@@ -16,6 +16,7 @@ __all__ = [
     "DELETE_PATH",
     "DOWNLOAD_PATH",
     "HEALTH_PATH",
+    "PROCESSING_MARKER",
     "PROCESSING_MESSAGE",
     "RATE_LIMIT_PER_SEC",
     "RETRIEVE_PATH",
@@ -75,6 +76,9 @@ HEALTH_PATH = "/health"
 # Body ``message`` returned (with HTTP 200) while a document is still processing.
 # Detecting this is how polling knows the result is not ready yet.
 PROCESSING_MESSAGE = "The document you submitted is being processed."
+# The distinctive part of that sentence, matched case-insensitively so detection
+# survives wording changes around it.
+PROCESSING_MARKER = "being processed"
 
 # Client defaults.
 DEFAULT_TIMEOUT = 30.0
