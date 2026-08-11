@@ -20,10 +20,12 @@ from .constants import (
     DEFAULT_BACKOFF_FACTOR,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT,
+    RETRIEVE_PATH,
     SUBMIT_PATH,
     DocType,
     Environment,
 )
+from .exceptions import APIError
 from .models import Submission
 
 if TYPE_CHECKING:
@@ -200,6 +202,41 @@ class PhotonClient:
             )
 
         return Submission.from_response(body)
+
+    def retrieve(self, photon_key: str) -> dict[str, Any]:
+        """Fetch the extraction result for a submitted document.
+
+        Args:
+            photon_key: The key from :attr:`Submission.photon_key`.
+
+        Returns:
+            The extracted fields, exactly as the API returned them (the body's
+            ``data`` object). Field names vary by doctype — see the doctype
+            family schemas in the API reference.
+
+        Raises:
+            ValueError: ``photon_key`` is empty — checked before any I/O.
+            NotReadyError: The document is still being processed; retry later,
+                or let ``extract()`` (Week 3) poll for you.
+            APIError: The response reported success but carried no ``data``
+                object.
+            PhotonError: See :meth:`Transport.request_json` for the rest of
+                the mapping.
+        """
+        if not photon_key or not photon_key.strip():
+            raise ValueError("photon_key must be a non-empty string.")
+
+        body = self._transport.request_json(
+            "GET", RETRIEVE_PATH, params={"photon_key": photon_key}
+        )
+
+        data = body.get("data")
+        if not isinstance(data, dict):
+            raise APIError(
+                "The response reported success but did not include a 'data' object.",
+                body=body,
+            )
+        return data
 
     def close(self) -> None:
         """Close the underlying connection pool. Safe to call more than once."""

@@ -1,0 +1,45 @@
+{
+    "data": {
+        "Vendor_Name": "Acme Supplies Ltd",
+        "Vendor_Email": "billing@acme-supplies.example",
+        "Vendor_Address": "1 Example Way, Springfield",
+        "Document_Type": "Invoice",
+        "Invoice_Number": "INV-2026-00042",
+        "PO_Number": "PO-7788",
+        "Date": "07/15/2026",
+        "Due_Date": "08/14/2026",
+        "Payment_Terms": "Net 30",
+        "Bill_To_Name": "Photon Test Buyer Inc",
+        "Subtotal": "1150.00",
+        "Tax": "84.50",
+        "Total": "1234.50",
+        "Balance_Due": "1234.50",
+        "Currency_Code": "USD",
+        "Pages": 1,
+        "Is_Duplicate": false,
+        "Notes": "",
+        "Tax_Lines": [
+            {
+                "Base": "1150.00",
+                "Name": "VAT",
+                "Order": 1,
+                "Rate": "7.35",
+                "Total": "84.50"
+            }
+        ],
+        "Line_Items": [
+            {
+                "Line": 1,
+                "SKU": "WID-100",
+                "Description": "Widget, standard",
+                "QTY": "10",
+                "Unit": "ea",
+                "Price": "115.00",
+                "Amount": "1150.00"
+            }
+        ],
+        "photon_key": "pk_fixture_0001"
+    },
+    "message": "success",
+    "status": "success"
+}
