@@ -78,6 +78,20 @@ class Config:
         # Derive the base URL from the environment unless one was given explicitly.
         if not self.base_url:
             object.__setattr__(self, "base_url", self.environment.base_url)
+            return
+
+        # An explicit base_url that is really the *other* environment's stock URL
+        # would silently send this environment's traffic to the wrong host — the
+        # easy way to hit it is dataclasses.replace(config, environment=...),
+        # which copies the already-derived base_url along. Refuse loudly.
+        for env in Environment:
+            if self.base_url == env.base_url and env is not self.environment:
+                raise ConfigurationError(
+                    f"base_url {self.base_url!r} is the {env.value} environment's URL, "
+                    f"but environment is {self.environment.value!r}. Set "
+                    f"environment={env.value!r} instead, or pass base_url='' to derive "
+                    "the URL from the environment."
+                )
 
     @classmethod
     def from_env(cls, **overrides: Any) -> Config:
@@ -92,8 +106,10 @@ class Config:
             name: os.environ.get(_ENV_PREFIX + name.upper(), "")
             for name in _REQUIRED_CREDENTIALS
         }
+        # An empty value means unset, same as PHOTON_BASE_URL below — a blank
+        # line in a .env file should fall back to the default, not error.
         environment = os.environ.get(_ENV_PREFIX + "ENVIRONMENT")
-        if environment is not None:
+        if environment:
             values["environment"] = environment
         base_url = os.environ.get(_ENV_PREFIX + "BASE_URL")
         if base_url:

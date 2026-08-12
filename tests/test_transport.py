@@ -1,8 +1,8 @@
 """Tests for the HTTP transport: headers, response classification, lifecycle.
 
 The API is stubbed with respx, so these assert the SDK's behaviour against the
-responses recorded in ``plans/API-REFERENCE.md`` — including the ones that report
-failure with an HTTP 200.
+responses shown in the official API docs (apidocs.photoncommerce.com) — including
+the ones that report failure with an HTTP 200.
 """
 
 from __future__ import annotations
@@ -259,6 +259,59 @@ def test_close_is_idempotent() -> None:
     transport.close()
     transport.close()
     assert transport.is_closed
+
+
+def test_redirects_are_not_followed_so_credentials_stay_home(transport: Transport) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.get(DOWNLOAD_PATH).mock(
+            return_value=httpx.Response(
+                302, headers={"location": "https://elsewhere.example/doc.pdf"}
+            )
+        )
+        with pytest.raises(APIError) as caught:
+            transport.request("GET", DOWNLOAD_PATH, params={"doc_path": "docs/1.pdf"})
+
+    assert caught.value.status_code == 302
+    assert "redirect" in caught.value.message.lower()
+    # Exactly one request, to the API host: the redirect target was never
+    # contacted, so no credential header left the API host. (Any request to
+    # another host would also have failed respx's all-mocked assertion.)
+    assert len(route.calls) == 1
+
+
+def test_downloaded_text_mentioning_processing_is_not_misread_as_not_ready(
+    transport: Transport,
+) -> None:
+    body = "INVOICE #42\nYour order is being processed by our warehouse team.\nTotal: $10"
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.get(DOWNLOAD_PATH).mock(
+            return_value=httpx.Response(200, text=body, headers={"content-type": "text/plain"})
+        )
+        response = transport.request("GET", DOWNLOAD_PATH, params={"doc_path": "docs/1.txt"})
+
+    assert response.text == body
+
+
+def test_json_body_without_content_type_error_names_the_real_problem(
+    transport: Transport,
+) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.get(RETRIEVE_PATH).mock(
+            return_value=httpx.Response(200, content=b'{"data": {"Total": 1}}')
+        )
+        with pytest.raises(APIError) as caught:
+            transport.request_json("GET", RETRIEVE_PATH)
+
+    assert "no content-type" in caught.value.message
+
+
+def test_empty_success_body_is_reported_as_empty(transport: Transport) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.get(RETRIEVE_PATH).mock(return_value=httpx.Response(200))
+        with pytest.raises(APIError) as caught:
+            transport.request_json("GET", RETRIEVE_PATH)
+
+    assert "empty body" in caught.value.message
 
 
 def test_repr_names_the_base_url_and_hides_credentials() -> None:

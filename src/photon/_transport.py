@@ -7,7 +7,7 @@ one place.
 Classification reads the response **body** before the status code, because the API
 puts the real outcome in the body's ``message``: a document that is still
 processing comes back as an HTTP 200, and several genuine failures come back as
-403. See ``plans/API-REFERENCE.md`` for the observed responses.
+403. See the official API docs (apidocs.photoncommerce.com) for the responses.
 """
 
 from __future__ import annotations
@@ -66,7 +66,13 @@ class Transport:
             base_url=config.base_url,
             headers={**build_auth_headers(config), "User-Agent": USER_AGENT},
             timeout=config.timeout,
-            follow_redirects=True,
+            # Never follow redirects: httpx strips only the Authorization header
+            # on a cross-origin redirect, so following one would re-send the
+            # CLIENT-ID, PASSWORD, and SECRET-KEY credentials to the redirect
+            # target (and a redirected POST is re-issued as a bodyless GET). The
+            # documented API never redirects; if an endpoint ever does, handle
+            # it explicitly without credentials rather than re-enabling this.
+            follow_redirects=False,
         )
 
     def request(
@@ -221,10 +227,22 @@ def _raise_for_response(response: httpx.Response, body: Any) -> None:
     message = _extract_message(response, body)
 
     if response.is_success:
-        # A still-processing document is reported as a successful response.
-        if PROCESSING_MARKER in message.lower():
+        # A still-processing document is reported as a successful JSON response.
+        # Only a JSON body can carry that signal — matching it against other
+        # content would misread a downloaded document that happens to contain
+        # the words.
+        if isinstance(body, dict) and PROCESSING_MARKER in message.lower():
             raise NotReadyError(message, status_code=status, body=body)
         return
+
+    if response.is_redirect:
+        location = response.headers.get("location", "unknown")
+        raise APIError(
+            f"Unexpected redirect to {location!r}. The SDK does not follow "
+            "redirects, to avoid re-sending credentials to another host.",
+            status_code=status,
+            body=body,
+        )
 
     if status == httpx.codes.UNAUTHORIZED:
         raise AuthenticationError(message, status_code=status, body=body)
@@ -281,7 +299,9 @@ def _text_snippet(response: httpx.Response) -> str:
 def _describe_content(response: httpx.Response) -> str:
     """Describe a response body that could not be used as JSON."""
     content_type = response.headers.get("content-type", "")
-    return f"content-type {content_type!r}" if content_type else "an empty body"
+    if content_type:
+        return f"content-type {content_type!r}"
+    return "a body with no content-type" if response.content else "an empty body"
 
 
 def _drop_none(params: dict[str, Any] | None) -> dict[str, Any] | None:
