@@ -1,7 +1,7 @@
 """Tests for PhotonClient.submit: input modes, validation, and the Submission model.
 
-The API is stubbed with respx; the submit response shape comes from
-``plans/API-REFERENCE.md``.
+The API is stubbed with respx; the submit response shape comes from the
+official API docs (apidocs.photoncommerce.com).
 """
 
 from __future__ import annotations
@@ -78,7 +78,9 @@ def test_path_input_uploads_multipart_pdf_field(
     assert submission.doc_path == "uploads/2026/invoice-abc.pdf"
 
 
-def test_file_object_input_is_uploaded_and_left_open(client: PhotonClient) -> None:
+def test_unnamed_file_object_is_uploaded_with_an_extension_and_left_open(
+    client: PhotonClient,
+) -> None:
     handle = io.BytesIO(PDF_BYTES)
 
     with respx.mock(base_url=BASE_URL) as mock:
@@ -87,11 +89,28 @@ def test_file_object_input_is_uploaded_and_left_open(client: PhotonClient) -> No
 
     request = route.calls.last.request
     assert b'name="pdf"' in request.content
+    # The API recognises file types by extension, so an unnamed stream must not
+    # go out under httpx's extensionless fallback name.
+    assert b'filename="upload.pdf"' in request.content
     assert PDF_BYTES in request.content
     assert not handle.closed
 
 
-def test_bytes_input_is_uploaded(client: PhotonClient) -> None:
+def test_named_file_object_keeps_its_own_filename(
+    tmp_path: Path, client: PhotonClient
+) -> None:
+    document = tmp_path / "receipt.png"
+    document.write_bytes(PDF_BYTES)
+
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock_submit(mock)
+        with document.open("rb") as handle:
+            client.submit(handle)
+
+    assert b'filename="receipt.png"' in route.calls.last.request.content
+
+
+def test_bytes_input_is_uploaded_with_an_extension(client: PhotonClient) -> None:
     with respx.mock(base_url=BASE_URL) as mock:
         route = mock_submit(mock)
         client.submit(PDF_BYTES)
@@ -99,6 +118,7 @@ def test_bytes_input_is_uploaded(client: PhotonClient) -> None:
     request = route.calls.last.request
     assert request.headers["content-type"].startswith("multipart/form-data")
     assert b'name="pdf"' in request.content
+    assert b'filename="upload.pdf"' in request.content
     assert PDF_BYTES in request.content
 
 
@@ -178,7 +198,7 @@ def test_both_document_and_url_is_a_value_error(client: PhotonClient) -> None:
 
 @pytest.mark.parametrize(
     "subaccount",
-    ["a" * 51, "under_score", "has space", "", "email@nope", "slash/nope"],
+    ["a" * 51, "under_score", "has space", "", "email@nope", "slash/nope", "team-1\n"],
 )
 def test_invalid_subaccount_is_a_value_error(client: PhotonClient, subaccount: str) -> None:
     with respx.mock(base_url=BASE_URL) as mock, pytest.raises(ValueError, match="subaccount"):

@@ -43,8 +43,13 @@ DocumentInput = str | os.PathLike[str] | IO[bytes] | bytes
 # actual file type.
 _FILE_FIELD = "pdf"
 
+# Filename sent for raw bytes and unnamed file objects. The API recognises file
+# types by extension, so the upload must carry one; callers whose content is not
+# a PDF should pass a path or a named file object instead.
+_DEFAULT_FILENAME = "upload.pdf"
+
 _SUBACCOUNT_MAX_LEN = 50
-_SUBACCOUNT_RE = re.compile(r"^[A-Za-z0-9-]+$")
+_SUBACCOUNT_RE = re.compile(r"[A-Za-z0-9-]+")
 
 
 class PhotonClient:
@@ -142,7 +147,10 @@ class PhotonClient:
         Args:
             document: The document to upload — a path, an open binary file
                 object, or raw bytes. A path is opened and closed by the
-                client; a file object is read as-is and left open.
+                client; a file object is read as-is and left open. The API
+                recognises file types by filename extension, so raw bytes and
+                unnamed file objects are uploaded as ``upload.pdf``; for other
+                file types, pass a path or a file object with a ``.name``.
             doctype: What kind of document this is; the API defaults to
                 invoice. Any string is passed through, so doctypes newer than
                 this SDK still work.
@@ -190,12 +198,12 @@ class PhotonClient:
         with contextlib.ExitStack() as cleanup:
             files: Any = None
             if isinstance(document, bytes):
-                files = {_FILE_FIELD: document}
+                files = {_FILE_FIELD: (_DEFAULT_FILENAME, document)}
             elif isinstance(document, (str, os.PathLike)):
                 handle = cleanup.enter_context(open(document, "rb"))
                 files = {_FILE_FIELD: (os.path.basename(os.fspath(document)), handle)}
             elif document is not None:
-                files = {_FILE_FIELD: document}
+                files = {_FILE_FIELD: (_filename_for(document), document)}
 
             body = self._transport.request_json(
                 "POST", SUBMIT_PATH, params=params, files=files
@@ -216,8 +224,7 @@ class PhotonClient:
 
         Raises:
             ValueError: ``photon_key`` is empty — checked before any I/O.
-            NotReadyError: The document is still being processed; retry later,
-                or let ``extract()`` (Week 3) poll for you.
+            NotReadyError: The document is still being processed; retry later.
             APIError: The response reported success but carried no ``data``
                 object.
             PhotonError: See :meth:`Transport.request_json` for the rest of
@@ -265,5 +272,21 @@ class PhotonClient:
         )
 
 
+def _filename_for(document: IO[bytes]) -> str:
+    """The filename to upload a file object under.
+
+    The API recognises file types by the uploaded filename's extension, so an
+    unnamed stream (``BytesIO``, a pipe, a fd-opened file) gets the default
+    rather than httpx's extensionless fallback.
+    """
+    name = getattr(document, "name", None)
+    if isinstance(name, str) and os.path.basename(name):
+        return os.path.basename(name)
+    return _DEFAULT_FILENAME
+
+
 def _is_valid_subaccount(subaccount: str) -> bool:
-    return len(subaccount) <= _SUBACCOUNT_MAX_LEN and bool(_SUBACCOUNT_RE.match(subaccount))
+    # fullmatch, not match: with match, "$" would accept a trailing newline.
+    return len(subaccount) <= _SUBACCOUNT_MAX_LEN and bool(
+        _SUBACCOUNT_RE.fullmatch(subaccount)
+    )

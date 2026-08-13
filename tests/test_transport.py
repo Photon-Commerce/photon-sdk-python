@@ -1,8 +1,8 @@
 """Tests for the HTTP transport: headers, response classification, lifecycle.
 
 The API is stubbed with respx, so these assert the SDK's behaviour against the
-responses recorded in ``plans/API-REFERENCE.md`` — including the ones that report
-failure with an HTTP 200.
+responses shown in the official API docs (apidocs.photoncommerce.com) — including
+the ones that report failure with an HTTP 200.
 """
 
 from __future__ import annotations

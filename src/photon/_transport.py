@@ -7,7 +7,7 @@ one place.
 Classification reads the response **body** before the status code, because the API
 puts the real outcome in the body's ``message``: a document that is still
 processing comes back as an HTTP 200, and several genuine failures come back as
-403. See ``plans/API-REFERENCE.md`` for the observed responses.
+403. See the official API docs (apidocs.photoncommerce.com) for the responses.
 """
 
 from __future__ import annotations
