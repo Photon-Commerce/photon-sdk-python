@@ -24,10 +24,13 @@ BASE_URL = "https://sandbox-api.photoncommerce.com"
 
 PDF_BYTES = b"%PDF-1.4 not a real document"
 
+# Mirrors the real sandbox response shape (captured 2026-08-13, email redacted):
+# photon_key/doc_path are storage paths embedding the account email.
 SUBMIT_RESPONSE = {
-    "photon_key": "pk_test_123",
-    "doc_path": "uploads/2026/invoice-abc.pdf",
+    "photon_key": "data/user@example.com/2026-08-12/13-26-39-943699_invoice.json",
+    "doc_path": "data/user@example.com/2026-08-12/13-26-39-943699_invoice.pdf",
     "message": "success",
+    "status": "success",
 }
 
 
@@ -74,8 +77,8 @@ def test_path_input_uploads_multipart_pdf_field(
     assert b'name="pdf"' in request.content
     assert b'filename="invoice.pdf"' in request.content
     assert PDF_BYTES in request.content
-    assert submission.photon_key == "pk_test_123"
-    assert submission.doc_path == "uploads/2026/invoice-abc.pdf"
+    assert submission.photon_key == SUBMIT_RESPONSE["photon_key"]
+    assert submission.doc_path == SUBMIT_RESPONSE["doc_path"]
 
 
 def test_unnamed_file_object_is_uploaded_with_an_extension_and_left_open(
@@ -178,7 +181,7 @@ def test_url_mode_sends_the_query_param_and_no_file(client: PhotonClient) -> Non
     assert request.url.params["url"] == "https://example.com/invoice.pdf"
     assert "multipart" not in request.headers.get("content-type", "")
     assert request.content == b""
-    assert submission.photon_key == "pk_test_123"
+    assert submission.photon_key == SUBMIT_RESPONSE["photon_key"]
 
 
 # --- validation, before any I/O -------------------------------------------
@@ -296,7 +299,7 @@ def test_submission_tolerates_a_missing_or_reshaped_body() -> None:
 def test_submission_keeps_extra_keys_on_raw() -> None:
     body = {**SUBMIT_RESPONSE, "brand_new_field": {"nested": True}}
     submission = Submission.from_response(body)
-    assert submission.photon_key == "pk_test_123"
+    assert submission.photon_key == SUBMIT_RESPONSE["photon_key"]
     assert submission.raw == body
     assert submission.raw["brand_new_field"] == {"nested": True}
 
