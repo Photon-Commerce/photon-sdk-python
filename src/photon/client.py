@@ -12,13 +12,16 @@ import contextlib
 import os
 import re
 from types import TracebackType
-from typing import IO, TYPE_CHECKING, Any, cast
+from typing import IO, TYPE_CHECKING, Any, cast, overload
 
+from ._polling import poll
 from ._transport import Transport
 from .config import Config
 from .constants import (
     DEFAULT_BACKOFF_FACTOR,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_POLL_TIMEOUT,
     DEFAULT_TIMEOUT,
     RETRIEVE_PATH,
     SUBMIT_PATH,
@@ -244,6 +247,87 @@ class PhotonClient:
                 body=body,
             )
         return data
+
+    @overload
+    def extract(
+        self,
+        document: DocumentInput | None = ...,
+        *,
+        doctype: DocType | str = ...,
+        poll_interval: float = ...,
+        timeout: float = ...,
+        **submit_kwargs: Any,
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def extract(
+        self,
+        document: DocumentInput | None = ...,
+        *,
+        doctype: DocType | str = ...,
+        poll_interval: float = ...,
+        timeout: None,
+        **submit_kwargs: Any,
+    ) -> Submission: ...
+
+    def extract(
+        self,
+        document: DocumentInput | None = None,
+        *,
+        doctype: DocType | str = DocType.INVOICE,
+        poll_interval: float = DEFAULT_POLL_INTERVAL,
+        timeout: float | None = DEFAULT_POLL_TIMEOUT,
+        **submit_kwargs: Any,
+    ) -> dict[str, Any] | Submission:
+        """Submit a document and wait for its extracted result.
+
+        The one-call form of :meth:`submit` followed by :meth:`retrieve`: it
+        polls until the document finishes processing, on a capped exponential
+        backoff, and returns the result.
+
+        Args:
+            document: The document to extract — a path, an open binary file
+                object, or raw bytes. See :meth:`submit`.
+            doctype: What kind of document this is.
+            poll_interval: Seconds to wait before the first re-check. Later
+                waits grow geometrically, capped at
+                :data:`~photon.constants.MAX_POLL_INTERVAL`.
+            timeout: How long to keep polling, in seconds. The default suits
+                AI-only extraction, which finishes in seconds; accounts with
+                human verification can take minutes to hours, so raise it (or
+                use a webhook). ``None`` skips polling entirely and returns the
+                :class:`Submission`, for webhook-driven flows.
+            **submit_kwargs: Any other :meth:`submit` argument — ``url``,
+                ``webhook_url``, ``auth_token``, ``reference_id``,
+                ``subaccount``, ``page_start``, ``page_end``.
+
+        Returns:
+            The extracted fields, as :meth:`retrieve` returns them — or the
+            :class:`Submission`, when ``timeout`` is ``None``.
+
+        Raises:
+            ValueError: An invalid argument, as for :meth:`submit`.
+            ExtractionTimeoutError: Still processing when ``timeout`` expired.
+                The document is not lost: retrieve it later with its
+                ``photon_key``, which the error's submission carries.
+            PhotonError: See :meth:`submit` and :meth:`retrieve`.
+        """
+        submission = self.submit(document, doctype=doctype, **submit_kwargs)
+        if timeout is None:
+            return submission
+
+        if not submission.photon_key:
+            raise APIError(
+                "The submission succeeded but returned no 'photon_key', "
+                "so the result cannot be retrieved.",
+                body=submission.raw,
+            )
+
+        return poll(
+            lambda: self.retrieve(submission.photon_key),
+            timeout=timeout,
+            interval=poll_interval,
+        )
 
     def close(self) -> None:
         """Close the underlying connection pool. Safe to call more than once."""
