@@ -17,22 +17,34 @@ from .exceptions import (
     PhotonError,
     QuotaExceededError,
 )
-from .models import Submission
+from .models import (
+    BaseDocument,
+    InvoiceDocument,
+    LineItem,
+    RawDocument,
+    Submission,
+    TaxLine,
+)
 
 __all__ = [
     "APIError",
     "AuthenticationError",
+    "BaseDocument",
     "Config",
     "ConfigurationError",
     "DocType",
     "Environment",
     "ExtractionTimeoutError",
     "InvalidRequestError",
+    "InvoiceDocument",
+    "LineItem",
     "NotReadyError",
     "PhotonClient",
     "PhotonConnectionError",
     "PhotonError",
     "QuotaExceededError",
+    "RawDocument",
     "Submission",
+    "TaxLine",
     "__version__",
 ]

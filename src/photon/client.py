@@ -12,13 +12,16 @@ import contextlib
 import os
 import re
 from types import TracebackType
-from typing import IO, TYPE_CHECKING, Any, cast
+from typing import IO, TYPE_CHECKING, Any, cast, overload
 
+from ._polling import poll, validate_settings
 from ._transport import Transport
 from .config import Config
 from .constants import (
     DEFAULT_BACKOFF_FACTOR,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_POLL_TIMEOUT,
     DEFAULT_TIMEOUT,
     RETRIEVE_PATH,
     SUBMIT_PATH,
@@ -26,7 +29,7 @@ from .constants import (
     Environment,
 )
 from .exceptions import APIError
-from .models import Submission
+from .models import BaseDocument, Submission, document_for
 
 if TYPE_CHECKING:
     # typing.Self only exists from 3.11; type checkers bundle typing_extensions,
@@ -211,20 +214,30 @@ class PhotonClient:
 
         return Submission.from_response(body)
 
-    def retrieve(self, photon_key: str) -> dict[str, Any]:
+    def retrieve(
+        self,
+        photon_key: str,
+        *,
+        doctype: DocType | str = DocType.INVOICE,
+    ) -> BaseDocument:
         """Fetch the extraction result for a submitted document.
 
         Args:
             photon_key: The key from :attr:`Submission.photon_key`.
+            doctype: The doctype this document was submitted as. It decides how
+                the result is typed — the API's response carries no doctype of
+                its own — so pass the same value you submitted with.
 
         Returns:
-            The extracted fields, exactly as the API returned them (the body's
-            ``data`` object). Field names vary by doctype — see the doctype
-            family schemas in the API reference.
+            The extracted document: an :class:`InvoiceDocument` for invoices and
+            receipt-expenses, otherwise a :class:`RawDocument`. Either way the
+            API's own field names work as keys (``doc["Vendor_Name"]``) and the
+            untouched payload is on ``doc.raw``.
 
         Raises:
             ValueError: ``photon_key`` is empty — checked before any I/O.
-            NotReadyError: The document is still being processed; retry later.
+            NotReadyError: The document is still being processed; retry later,
+                or let :meth:`extract` do the waiting.
             APIError: The response reported success but carried no ``data``
                 object.
             PhotonError: See :meth:`Transport.request_json` for the rest of
@@ -243,7 +256,95 @@ class PhotonClient:
                 "The response reported success but did not include a 'data' object.",
                 body=body,
             )
-        return data
+        return document_for(data, doctype)
+
+    @overload
+    def extract(
+        self,
+        document: DocumentInput | None = ...,
+        *,
+        doctype: DocType | str = ...,
+        poll_interval: float = ...,
+        timeout: float = ...,
+        **submit_kwargs: Any,
+    ) -> BaseDocument: ...
+
+    @overload
+    def extract(
+        self,
+        document: DocumentInput | None = ...,
+        *,
+        doctype: DocType | str = ...,
+        poll_interval: float = ...,
+        timeout: None,
+        **submit_kwargs: Any,
+    ) -> Submission: ...
+
+    def extract(
+        self,
+        document: DocumentInput | None = None,
+        *,
+        doctype: DocType | str = DocType.INVOICE,
+        poll_interval: float = DEFAULT_POLL_INTERVAL,
+        timeout: float | None = DEFAULT_POLL_TIMEOUT,
+        **submit_kwargs: Any,
+    ) -> BaseDocument | Submission:
+        """Submit a document and wait for its extracted result.
+
+        The one-call form of :meth:`submit` followed by :meth:`retrieve`: it
+        polls until the document finishes processing, on a capped exponential
+        backoff, and returns the result.
+
+        Args:
+            document: The document to extract — a path, an open binary file
+                object, or raw bytes. See :meth:`submit`.
+            doctype: What kind of document this is.
+            poll_interval: Seconds to wait before the first re-check. Later
+                waits grow geometrically, capped at
+                :data:`~photon.constants.MAX_POLL_INTERVAL`.
+            timeout: How long to keep polling, in seconds. The default suits
+                AI-only extraction, which finishes in seconds; accounts with
+                human verification can take minutes to hours, so raise it (or
+                use a webhook). ``None`` skips polling entirely and returns the
+                :class:`Submission`, for webhook-driven flows.
+            **submit_kwargs: Any other :meth:`submit` argument — ``url``,
+                ``webhook_url``, ``auth_token``, ``reference_id``,
+                ``subaccount``, ``page_start``, ``page_end``.
+
+        Returns:
+            The extracted document, as :meth:`retrieve` returns it — or the
+            :class:`Submission`, when ``timeout`` is ``None``.
+
+        Raises:
+            ValueError: An invalid argument, as for :meth:`submit`, or a
+                ``poll_interval`` that is not positive — both checked before
+                anything is uploaded.
+            ExtractionTimeoutError: Still processing when ``timeout`` expired.
+                The document is not lost: retrieve it later with its
+                ``photon_key``, which the error's submission carries.
+            PhotonError: See :meth:`submit` and :meth:`retrieve`.
+        """
+        if timeout is not None:
+            # Check before submitting: otherwise a bad interval costs an upload
+            # and an API call before poll() ever sees it.
+            validate_settings(interval=poll_interval)
+
+        submission = self.submit(document, doctype=doctype, **submit_kwargs)
+        if timeout is None:
+            return submission
+
+        if not submission.photon_key:
+            raise APIError(
+                "The submission succeeded but returned no 'photon_key', "
+                "so the result cannot be retrieved.",
+                body=submission.raw,
+            )
+
+        return poll(
+            lambda: self.retrieve(submission.photon_key, doctype=doctype),
+            timeout=timeout,
+            interval=poll_interval,
+        )
 
     def close(self) -> None:
         """Close the underlying connection pool. Safe to call more than once."""
