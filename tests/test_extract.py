@@ -388,3 +388,24 @@ def test_extract_leaves_unmodelled_doctypes_raw(client: PhotonClient) -> None:
         doc = client.extract(PDF_BYTES, doctype=DocType.CHECK)
 
     assert isinstance(doc, RawDocument)
+
+
+def test_extract_rejects_a_bad_poll_interval_before_uploading(
+    client: PhotonClient,
+) -> None:
+    with respx.mock(base_url=BASE_URL, assert_all_called=False) as mock:
+        submit = mock.post(SUBMIT_PATH)
+
+        with pytest.raises(ValueError, match="interval"):
+            client.extract(PDF_BYTES, poll_interval=0)
+
+    assert not submit.called
+
+
+def test_extract_without_polling_ignores_the_interval(client: PhotonClient) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post(SUBMIT_PATH).mock(return_value=httpx.Response(200, json=SUBMIT_RESPONSE))
+
+        result = client.extract(PDF_BYTES, poll_interval=0, timeout=None)
+
+    assert isinstance(result, Submission)

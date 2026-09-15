@@ -14,7 +14,7 @@ import re
 from types import TracebackType
 from typing import IO, TYPE_CHECKING, Any, cast, overload
 
-from ._polling import poll
+from ._polling import poll, validate_settings
 from ._transport import Transport
 from .config import Config
 from .constants import (
@@ -316,12 +316,19 @@ class PhotonClient:
             :class:`Submission`, when ``timeout`` is ``None``.
 
         Raises:
-            ValueError: An invalid argument, as for :meth:`submit`.
+            ValueError: An invalid argument, as for :meth:`submit`, or a
+                ``poll_interval`` that is not positive — both checked before
+                anything is uploaded.
             ExtractionTimeoutError: Still processing when ``timeout`` expired.
                 The document is not lost: retrieve it later with its
                 ``photon_key``, which the error's submission carries.
             PhotonError: See :meth:`submit` and :meth:`retrieve`.
         """
+        if timeout is not None:
+            # Check before submitting: otherwise a bad interval costs an upload
+            # and an API call before poll() ever sees it.
+            validate_settings(interval=poll_interval)
+
         submission = self.submit(document, doctype=doctype, **submit_kwargs)
         if timeout is None:
             return submission

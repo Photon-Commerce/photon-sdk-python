@@ -21,9 +21,32 @@ from .constants import (
 )
 from .exceptions import ExtractionTimeoutError, NotReadyError
 
-__all__ = ["poll"]
+__all__ = ["poll", "validate_settings"]
 
 T = TypeVar("T")
+
+
+def validate_settings(
+    *,
+    interval: float,
+    backoff: float = DEFAULT_POLL_BACKOFF,
+    max_interval: float = MAX_POLL_INTERVAL,
+) -> None:
+    """Check polling settings, so callers can reject them before doing any I/O.
+
+    :func:`poll` applies these itself, but by then a caller like
+    ``PhotonClient.extract`` has already uploaded a document and spent an API
+    call. Validating up front keeps a bad argument cheap.
+
+    Raises:
+        ValueError: A setting that would make polling impossible.
+    """
+    if interval <= 0:
+        raise ValueError("interval must be greater than zero.")
+    if backoff < 1:
+        raise ValueError("backoff must be 1 or greater.")
+    if max_interval <= 0:
+        raise ValueError("max_interval must be greater than zero.")
 
 
 def poll(
@@ -66,10 +89,7 @@ def poll(
             processing. It is not lost — retrieve it later by its
             ``photon_key``.
     """
-    if interval <= 0:
-        raise ValueError("interval must be greater than zero.")
-    if backoff < 1:
-        raise ValueError("backoff must be 1 or greater.")
+    validate_settings(interval=interval, backoff=backoff, max_interval=max_interval)
 
     do_sleep = time.sleep if sleep is None else sleep
     now = time.monotonic if clock is None else clock
