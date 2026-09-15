@@ -29,7 +29,7 @@ from .constants import (
     Environment,
 )
 from .exceptions import APIError
-from .models import Submission
+from .models import BaseDocument, Submission, document_for
 
 if TYPE_CHECKING:
     # typing.Self only exists from 3.11; type checkers bundle typing_extensions,
@@ -214,20 +214,30 @@ class PhotonClient:
 
         return Submission.from_response(body)
 
-    def retrieve(self, photon_key: str) -> dict[str, Any]:
+    def retrieve(
+        self,
+        photon_key: str,
+        *,
+        doctype: DocType | str = DocType.INVOICE,
+    ) -> BaseDocument:
         """Fetch the extraction result for a submitted document.
 
         Args:
             photon_key: The key from :attr:`Submission.photon_key`.
+            doctype: The doctype this document was submitted as. It decides how
+                the result is typed — the API's response carries no doctype of
+                its own — so pass the same value you submitted with.
 
         Returns:
-            The extracted fields, exactly as the API returned them (the body's
-            ``data`` object). Field names vary by doctype — see the doctype
-            family schemas in the API reference.
+            The extracted document: an :class:`InvoiceDocument` for invoices and
+            receipt-expenses, otherwise a :class:`RawDocument`. Either way the
+            API's own field names work as keys (``doc["Vendor_Name"]``) and the
+            untouched payload is on ``doc.raw``.
 
         Raises:
             ValueError: ``photon_key`` is empty — checked before any I/O.
-            NotReadyError: The document is still being processed; retry later.
+            NotReadyError: The document is still being processed; retry later,
+                or let :meth:`extract` do the waiting.
             APIError: The response reported success but carried no ``data``
                 object.
             PhotonError: See :meth:`Transport.request_json` for the rest of
@@ -246,7 +256,7 @@ class PhotonClient:
                 "The response reported success but did not include a 'data' object.",
                 body=body,
             )
-        return data
+        return document_for(data, doctype)
 
     @overload
     def extract(
@@ -257,7 +267,7 @@ class PhotonClient:
         poll_interval: float = ...,
         timeout: float = ...,
         **submit_kwargs: Any,
-    ) -> dict[str, Any]: ...
+    ) -> BaseDocument: ...
 
     @overload
     def extract(
@@ -278,7 +288,7 @@ class PhotonClient:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         timeout: float | None = DEFAULT_POLL_TIMEOUT,
         **submit_kwargs: Any,
-    ) -> dict[str, Any] | Submission:
+    ) -> BaseDocument | Submission:
         """Submit a document and wait for its extracted result.
 
         The one-call form of :meth:`submit` followed by :meth:`retrieve`: it
@@ -302,7 +312,7 @@ class PhotonClient:
                 ``subaccount``, ``page_start``, ``page_end``.
 
         Returns:
-            The extracted fields, as :meth:`retrieve` returns them — or the
+            The extracted document, as :meth:`retrieve` returns it — or the
             :class:`Submission`, when ``timeout`` is ``None``.
 
         Raises:
@@ -324,7 +334,7 @@ class PhotonClient:
             )
 
         return poll(
-            lambda: self.retrieve(submission.photon_key),
+            lambda: self.retrieve(submission.photon_key, doctype=doctype),
             timeout=timeout,
             interval=poll_interval,
         )

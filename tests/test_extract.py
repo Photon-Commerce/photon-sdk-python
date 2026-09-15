@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Iterator
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,10 @@ from photon import (
     AuthenticationError,
     DocType,
     ExtractionTimeoutError,
+    InvoiceDocument,
     NotReadyError,
     PhotonClient,
+    RawDocument,
     Submission,
 )
 from photon._polling import poll
@@ -363,3 +366,25 @@ def test_extract_validates_before_submitting(client: PhotonClient) -> None:
             client.extract()
 
     assert not submit.called
+
+
+def test_extract_returns_the_typed_model_for_its_doctype(client: PhotonClient) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post(SUBMIT_PATH).mock(return_value=httpx.Response(200, json=SUBMIT_RESPONSE))
+        mock.get(RETRIEVE_PATH).mock(return_value=httpx.Response(200, json=INVOICE_READY))
+
+        doc = client.extract(PDF_BYTES, doctype=DocType.INVOICE)
+
+    assert isinstance(doc, InvoiceDocument)
+    assert doc.total == Decimal("1234.50")
+    assert doc.vendor_name == doc["Vendor_Name"]
+
+
+def test_extract_leaves_unmodelled_doctypes_raw(client: PhotonClient) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post(SUBMIT_PATH).mock(return_value=httpx.Response(200, json=SUBMIT_RESPONSE))
+        mock.get(RETRIEVE_PATH).mock(return_value=httpx.Response(200, json=INVOICE_READY))
+
+        doc = client.extract(PDF_BYTES, doctype=DocType.CHECK)
+
+    assert isinstance(doc, RawDocument)

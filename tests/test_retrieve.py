@@ -55,13 +55,13 @@ def mock_retrieve(mock: respx.MockRouter, response: httpx.Response) -> respx.Rou
     return mock.get(RETRIEVE_PATH).mock(return_value=response)
 
 
-def test_ready_document_returns_the_data_dict(client: PhotonClient) -> None:
+def test_ready_document_returns_the_extracted_data(client: PhotonClient) -> None:
     with respx.mock(base_url=BASE_URL) as mock:
         route = mock_retrieve(mock, httpx.Response(200, json=INVOICE_READY))
         data = client.retrieve("pk_fixture_0001")
 
     assert route.calls.last.request.url.params["photon_key"] == "pk_fixture_0001"
-    assert data == INVOICE_READY["data"]
+    assert data.raw == INVOICE_READY["data"]
     assert data["Vendor_Name"] == "Acme Supplies Ltd"
     assert data["Line_Items"][0]["Amount"] == "1150.00"
 
