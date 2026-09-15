@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from photon.config import Config
@@ -43,6 +45,35 @@ def test_production_base_url() -> None:
 def test_explicit_base_url_overrides_environment() -> None:
     config = make_config(base_url="https://example.test")
     assert config.base_url == "https://example.test"
+
+
+def test_replace_with_a_new_environment_rejects_the_stale_base_url() -> None:
+    config = make_config(environment=Environment.PRODUCTION)
+    with pytest.raises(ConfigurationError, match="base_url"):
+        dataclasses.replace(config, environment=Environment.SANDBOX)
+
+
+def test_replace_with_a_new_environment_and_cleared_base_url_rederives() -> None:
+    config = make_config(environment=Environment.PRODUCTION)
+    replaced = dataclasses.replace(config, environment=Environment.SANDBOX, base_url="")
+    assert replaced.base_url == "https://sandbox-api.photoncommerce.com"
+
+
+def test_custom_base_url_survives_replace() -> None:
+    config = make_config(base_url="https://proxy.example.test")
+    replaced = dataclasses.replace(config, environment=Environment.PRODUCTION)
+    assert replaced.base_url == "https://proxy.example.test"
+
+
+def test_the_other_environments_stock_url_is_rejected() -> None:
+    # environment defaults to sandbox; the production URL contradicts it.
+    with pytest.raises(ConfigurationError, match="production"):
+        make_config(base_url="https://api.photoncommerce.com")
+
+
+def test_the_matching_environments_stock_url_is_accepted() -> None:
+    config = make_config(base_url="https://sandbox-api.photoncommerce.com")
+    assert config.environment is Environment.SANDBOX
 
 
 def test_missing_client_id_raises() -> None:
@@ -123,6 +154,55 @@ def test_from_env_unknown_environment_raises(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(ConfigurationError, match="Unknown environment"):
         Config.from_env()
+
+
+def test_from_env_empty_environment_falls_back_to_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name, value in {
+        "CLIENT_ID": "cid",
+        "USERNAME": "user",
+        "API_KEY": "key",
+        "PASSWORD": "pw",
+        "SECRET_KEY": "sk",
+        "ENVIRONMENT": "",
+    }.items():
+        monkeypatch.setenv("PHOTON_" + name, value)
+
+    config = Config.from_env()
+
+    assert config.environment is Environment.SANDBOX
+    assert config.base_url == "https://sandbox-api.photoncommerce.com"
+
+
+def test_from_env_reads_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name, value in {
+        "CLIENT_ID": "cid",
+        "USERNAME": "user",
+        "API_KEY": "key",
+        "PASSWORD": "pw",
+        "SECRET_KEY": "sk",
+        "BASE_URL": "https://proxy.example.test",
+    }.items():
+        monkeypatch.setenv("PHOTON_" + name, value)
+    monkeypatch.delenv("PHOTON_ENVIRONMENT", raising=False)
+
+    assert Config.from_env().base_url == "https://proxy.example.test"
+
+
+def test_from_env_empty_base_url_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name, value in {
+        "CLIENT_ID": "cid",
+        "USERNAME": "user",
+        "API_KEY": "key",
+        "PASSWORD": "pw",
+        "SECRET_KEY": "sk",
+        "BASE_URL": "",
+    }.items():
+        monkeypatch.setenv("PHOTON_" + name, value)
+    monkeypatch.delenv("PHOTON_ENVIRONMENT", raising=False)
+
+    assert Config.from_env().base_url == "https://sandbox-api.photoncommerce.com"
 
 
 def test_from_env_missing_credentials_raises(monkeypatch: pytest.MonkeyPatch) -> None:
