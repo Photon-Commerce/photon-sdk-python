@@ -12,10 +12,14 @@ __all__ = [
     "ADD_LINE_ITEM_PATH",
     "DEFAULT_BACKOFF_FACTOR",
     "DEFAULT_MAX_RETRIES",
+    "DEFAULT_POLL_BACKOFF",
+    "DEFAULT_POLL_INTERVAL",
+    "DEFAULT_POLL_TIMEOUT",
     "DEFAULT_TIMEOUT",
     "DELETE_PATH",
     "DOWNLOAD_PATH",
     "HEALTH_PATH",
+    "MAX_POLL_INTERVAL",
     "PROCESSING_MARKER",
     "PROCESSING_MESSAGE",
     "RATE_LIMIT_PER_SEC",
@@ -84,5 +88,13 @@ PROCESSING_MARKER = "being processed"
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_FACTOR = 0.5
+
+# Polling defaults, tuned for AI-only extraction, which finishes in seconds.
+# Accounts with human verification can take minutes to hours, so those callers
+# should raise ``timeout`` or receive a webhook instead of polling.
+DEFAULT_POLL_INTERVAL = 2.0
+DEFAULT_POLL_BACKOFF = 1.5
+MAX_POLL_INTERVAL = 30.0
+DEFAULT_POLL_TIMEOUT = 300.0
 # The API accepts up to this many requests per second; excess is queued server-side.
 RATE_LIMIT_PER_SEC = 10
