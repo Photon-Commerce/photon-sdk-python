@@ -8,6 +8,7 @@ unreadable values read as ``None``.
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -57,8 +58,8 @@ def test_typed_attributes_mirror_the_api_field_names(invoice: InvoiceDocument) -
     assert invoice.invoice_number == invoice["Invoice_Number"] == "INV-2026-00042"
     assert invoice.currency_code == "USD"
     assert invoice.document_type == "Invoice"
-    assert invoice.date == "07/15/2026"
-    assert invoice.due_date == "08/14/2026"
+    assert invoice.po_number == "PO-7788"
+    assert invoice.payment_terms == "Net 30"
     assert invoice.vendor_email == "billing@acme-supplies.example"
     assert invoice.bill_to_name == "Photon Test Buyer Inc"
     assert invoice.photon_key == "pk_fixture_0001"
@@ -103,6 +104,254 @@ def test_tax_lines_are_parsed(invoice: InvoiceDocument) -> None:
     assert tax.rate == Decimal("7.35")
     assert tax.total == Decimal("84.50")
     assert tax.order == 1
+
+
+# Every Family A key in the API reference, so a field the model forgets to
+# alias fails here rather than silently reading as ``None``.
+FAMILY_A_KEYS = [
+    "Balance_Due",
+    "Total",
+    "Subtotal",
+    "Shipping",
+    "Tax",
+    "Tip",
+    "Cashback",
+    "Discount",
+    "Document_Type",
+    "Invoice_Number",
+    "Check_Number",
+    "PO_Number",
+    "Date",
+    "Created",
+    "Order_Date",
+    "Due_Date",
+    "Ship_Date",
+    "Delivery_Date",
+    "Service_Start_Date",
+    "Service_End_Date",
+    "Category",
+    "Currency_Code",
+    "Payment_Terms",
+    "Account_Number",
+    "Bill_To_Name",
+    "Bill_To_Recipient",
+    "Bill_To_Address",
+    "Bill_To_Address_Line",
+    "Bill_To_City",
+    "Bill_To_State",
+    "Bill_To_Zipcode",
+    "Bill_To_Vat_Number",
+    "Bill_To_Email",
+    "Card_Number",
+    "Payment_Display_Name",
+    "Payment_Type",
+    "Phone_Number",
+    "Vat_Number",
+    "Vendor_Name",
+    "Vendor_Raw_Name",
+    "Vendor_Recipient",
+    "Vendor_Email",
+    "Vendor_Address",
+    "Vendor_Address_Line",
+    "Vendor_City",
+    "Vendor_State",
+    "Vendor_Zipcode",
+    "Vendor_Country",
+    "Vendor_Type",
+    "Vendor_Phone",
+    "Vendor_Fax",
+    "Vendor_Website",
+    "Vendor_ABN_Number",
+    "Vendor_Bank_Name",
+    "Vendor_Bank_Number",
+    "Vendor_Bank_Swift",
+    "Vendor_IBAN",
+    "Vendor_Account_Number",
+    "Remit_To_Name",
+    "Remit_To_Address",
+    "All_Email_Addresses",
+    "Ship_To_Name",
+    "Ship_To_Address",
+    "Carrier",
+    "Tracking_Number",
+    "Pages",
+    "Is_Duplicate",
+    "Notes",
+    "Tax_Lines",
+    "Line_Items",
+    "photon_key",
+    "Fraud_Score",
+    "Risk_Score",
+    "Anomaly_Score",
+]
+
+# A receipt-expense with every Family A field filled in.
+FULL_RECEIPT: dict[str, Any] = {
+    **{key: f"{key.lower()}-value" for key in FAMILY_A_KEYS},
+    **{
+        key: "12.34"
+        for key in [
+            "Balance_Due",
+            "Total",
+            "Subtotal",
+            "Shipping",
+            "Tax",
+            "Tip",
+            "Cashback",
+            "Discount",
+            "Fraud_Score",
+            "Risk_Score",
+            "Anomaly_Score",
+        ]
+    },
+    **{
+        key: "2026-07-15"
+        for key in [
+            "Date",
+            "Created",
+            "Order_Date",
+            "Due_Date",
+            "Ship_Date",
+            "Delivery_Date",
+            "Service_Start_Date",
+            "Service_End_Date",
+        ]
+    },
+    "Document_Type": "Receipt",
+    "Vendor_Zipcode": "02134",
+    "All_Email_Addresses": "a@example.com, b@example.com",
+    "Pages": 2,
+    "Is_Duplicate": "false",
+    "Tax_Lines": [{"Name": "GST", "Total": "1.12"}],
+    "Line_Items": [{"Line": 1, "Amount": "11.22"}, {"Line": 2, "Amount": "1.12"}],
+}
+
+
+def test_every_documented_family_a_field_has_a_typed_attribute() -> None:
+    aliases = {field.alias for field in InvoiceDocument.model_fields.values()}
+
+    assert set(FAMILY_A_KEYS) - aliases == set()
+
+
+def test_a_fully_populated_receipt_types_every_field() -> None:
+    doc = document_for(FULL_RECEIPT, DocType.RECEIPT_EXPENSE)
+    assert isinstance(doc, InvoiceDocument)
+
+    unset = [
+        name
+        for name in InvoiceDocument.model_fields
+        if name != "raw" and getattr(doc, name) in (None, [])
+    ]
+    assert unset == []
+    assert doc.raw == FULL_RECEIPT
+
+
+def test_the_extended_fields_are_typed() -> None:
+    doc = InvoiceDocument.from_payload(FULL_RECEIPT)
+
+    assert doc.shipping == doc.tip == doc.cashback == Decimal("12.34")
+    assert doc.fraud_score == Decimal("12.34")
+    assert doc.vendor_iban == "vendor_iban-value"
+    assert doc.vendor_zipcode == "02134"  # text, so the leading zero survives
+    assert doc.service_end_date == date(2026, 7, 15)
+    assert doc.all_email_addresses == ["a@example.com", "b@example.com"]
+    assert doc.pages == 2
+    assert len(doc.line_items) == 2
+
+
+def test_opt_in_scores_default_to_none(invoice: InvoiceDocument) -> None:
+    assert invoice.fraud_score is None
+    assert invoice.risk_score is None
+    assert invoice.anomaly_score is None
+
+
+# --------------------------------------------------------------------------- #
+# Dates and email lists
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("sent", "expected"),
+    [
+        ("2026-07-15", date(2026, 7, 15)),
+        (" 2026-07-15 ", date(2026, 7, 15)),
+        ("2026-07-15T09:30:00", date(2026, 7, 15)),
+        ("2026-07-15T09:30:00Z", date(2026, 7, 15)),
+        ("2026-07-15 09:30:00+02:00", date(2026, 7, 15)),
+        (date(2026, 7, 15), date(2026, 7, 15)),
+        (datetime(2026, 7, 15, 9, 30, tzinfo=timezone.utc), date(2026, 7, 15)),
+        ("07/15/2026", None),  # month- or day-first is a guess; not made
+        ("15.07.2026", None),
+        ("20260715", None),
+        ("2026-13-45", None),
+        ("", None),
+        (None, None),
+        (1752537600, None),  # not read as a Unix timestamp
+        (True, None),
+    ],
+)
+def test_dates_parse_only_from_iso(sent: Any, expected: Any) -> None:
+    assert InvoiceDocument.from_payload({"Date": sent}).date == expected
+
+
+def test_a_non_iso_date_stays_readable_by_name(invoice: InvoiceDocument) -> None:
+    assert invoice.date is None
+    assert invoice["Date"] == "07/15/2026"
+    assert invoice["Due_Date"] == "08/14/2026"
+
+
+@pytest.mark.parametrize(
+    ("sent", "expected"),
+    [
+        (["a@example.com", " b@example.com ", ""], ["a@example.com", "b@example.com"]),
+        ("a@example.com;b@example.com", ["a@example.com", "b@example.com"]),
+        ("a@example.com b@example.com\n", ["a@example.com", "b@example.com"]),
+        ("", []),
+        (None, []),
+        (42, []),
+    ],
+)
+def test_email_addresses_tolerate_list_or_string(sent: Any, expected: Any) -> None:
+    assert InvoiceDocument.from_payload({"All_Email_Addresses": sent}).all_email_addresses == (
+        expected
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Serialisation
+# --------------------------------------------------------------------------- #
+
+
+def test_to_dict_returns_typed_values_without_raw(invoice: InvoiceDocument) -> None:
+    data = invoice.to_dict()
+
+    assert "raw" not in data
+    assert data["total"] == Decimal("1234.50")
+    assert data["vendor_name"] == "Acme Supplies Ltd"
+    assert data["line_items"][0]["amount"] == Decimal("1150.00")
+    assert "raw" not in data["line_items"][0]
+
+
+def test_to_dict_by_alias_uses_the_apis_names(invoice: InvoiceDocument) -> None:
+    data = invoice.to_dict(by_alias=True)
+
+    assert data["Vendor_Name"] == "Acme Supplies Ltd"
+    assert data["Line_Items"][0]["Amount"] == Decimal("1150.00")
+    assert set(INVOICE_DATA) <= set(data)
+
+
+def test_to_json_keeps_amounts_exact_and_dates_iso() -> None:
+    doc = InvoiceDocument.from_payload({"Total": "0.10", "Date": "2026-07-15"})
+
+    data = json.loads(doc.to_json())
+
+    assert data["total"] == "0.10"
+    assert data["date"] == "2026-07-15"
+    assert "raw" not in data
+
+
+def test_raw_round_trips_the_payload_exactly() -> None:
+    assert InvoiceDocument.from_payload(FULL_RECEIPT).raw == FULL_RECEIPT
 
 
 # --------------------------------------------------------------------------- #

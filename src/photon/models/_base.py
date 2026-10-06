@@ -14,7 +14,9 @@ rather than an error, and the original value remains in ``raw``.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, ItemsView, KeysView, Mapping, Sequence, ValuesView
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 
@@ -23,7 +25,17 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 if TYPE_CHECKING:
     from typing_extensions import Self
 
-__all__ = ["Count", "Flag", "Money", "PayloadModel", "Text", "items_of"]
+__all__ = [
+    "Count",
+    "Day",
+    "EmailList",
+    "Flag",
+    "Money",
+    "Number",
+    "PayloadModel",
+    "Text",
+    "items_of",
+]
 
 
 class PayloadModel(BaseModel):
@@ -36,7 +48,7 @@ class PayloadModel(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True, extra="ignore")
 
-    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
+    raw: dict[str, Any] = Field(default_factory=dict, repr=False, exclude=True)
     """The payload exactly as the API returned it."""
 
     @classmethod
@@ -45,6 +57,22 @@ class PayloadModel(BaseModel):
         values = dict(payload)
         values["raw"] = dict(payload)
         return cls.model_validate(values)
+
+    # -- serialisation of the typed fields ---------------------------------- #
+
+    def to_dict(self, *, by_alias: bool = False) -> dict[str, Any]:
+        """The typed fields as a dict, nested lines included.
+
+        Values keep their parsed types (:class:`~decimal.Decimal`,
+        :class:`~datetime.date`). Keys are the attribute names, or the API's
+        own names with ``by_alias=True``. For the untouched payload, use
+        :attr:`raw`.
+        """
+        return self.model_dump(by_alias=by_alias)
+
+    def to_json(self, *, by_alias: bool = False, indent: int | None = None) -> str:
+        """The typed fields as JSON; amounts become strings so they stay exact."""
+        return self.model_dump_json(by_alias=by_alias, indent=indent)
 
     # -- read-only mapping access to the raw payload ------------------------ #
 
@@ -119,6 +147,50 @@ def _to_int(value: Any) -> int | None:
         return None
 
 
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _to_date(value: Any) -> date | None:
+    """Parse an ISO 8601 date, or the date part of an ISO timestamp.
+
+    Only ISO is read. A form like ``"07/08/2026"`` is ambiguous between
+    month-first and day-first, and guessing would silently produce a wrong
+    date, so it becomes ``None`` and the printed form stays on ``raw``.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not _ISO_DATE.match(text):
+        return None
+    try:
+        if len(text) == 10:
+            return date.fromisoformat(text)
+        # Python 3.10 cannot parse a trailing "Z" itself.
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text).date()
+    except ValueError:
+        return None
+
+
+_EMAIL_SEPARATORS = re.compile(r"[,;\s]+")
+
+
+def _to_email_list(value: Any) -> list[str]:
+    """Normalise addresses sent as a list or as one delimited string."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [part for part in _EMAIL_SEPARATORS.split(value) if part]
+    if isinstance(value, bytes) or not isinstance(value, Sequence):
+        return []
+    return [text for text in map(_to_text, value) if text is not None]
+
+
 def _to_bool(value: Any) -> bool | None:
     if value is None:
         return None
@@ -137,6 +209,15 @@ Text = Annotated[str | None, BeforeValidator(_to_text)]
 
 Money = Annotated[Decimal | None, BeforeValidator(_to_decimal)]
 """A monetary amount, parsed from the API's string form into :class:`Decimal`."""
+
+Number = Annotated[Decimal | None, BeforeValidator(_to_decimal)]
+"""A non-monetary number, such as a score, parsed into :class:`Decimal`."""
+
+Day = Annotated[date | None, BeforeValidator(_to_date)]
+"""A calendar date, parsed only from ISO 8601 (see :func:`_to_date`)."""
+
+EmailList = Annotated[list[str], BeforeValidator(_to_email_list)]
+"""Email addresses; a missing or unreadable value is an empty list."""
 
 Count = Annotated[int | None, BeforeValidator(_to_int)]
 """A whole-number field, such as a page or line number."""
