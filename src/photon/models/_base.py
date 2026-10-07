@@ -242,10 +242,6 @@ def items_of(model: type[_ModelT]) -> Callable[[Any], Any]:
             return []
         if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
             return []
-        return [
-            model.from_payload(entry)
-            for entry in value
-            if isinstance(entry, Mapping)
-        ]
+        return [model.from_payload(entry) for entry in value if isinstance(entry, Mapping)]
 
     return convert

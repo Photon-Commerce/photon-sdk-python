@@ -53,9 +53,9 @@ client = PhotonClient(
 # Submit a document and wait for the extracted result
 invoice = client.extract("invoice.pdf", doctype="invoice")
 
-print(invoice["Vendor_Name"])    # Acme Supplies
-print(invoice["Invoice_Number"]) # INV-2024-00842
-print(invoice["Total"])          # 4750.00
+print(invoice["Vendor_Name"])  # Acme Supplies
+print(invoice["Invoice_Number"])  # INV-2024-00842
+print(invoice["Total"])  # 4750.00
 print(invoice["Currency_Code"])  # USD
 ```
 
@@ -80,10 +80,10 @@ Extraction is a two-step flow. Until the SDK ships, here is the raw API workflow
 import requests
 
 HEADERS = {
-    "CLIENT-ID":     "YOUR_CLIENT_ID",
+    "CLIENT-ID": "YOUR_CLIENT_ID",
     "AUTHORIZATION": "apikey YOUR_USERNAME:YOUR_API_KEY",
-    "PASSWORD":      "YOUR_PASSWORD",
-    "SECRET-KEY":    "YOUR_SECRET_KEY",
+    "PASSWORD": "YOUR_PASSWORD",
+    "SECRET-KEY": "YOUR_SECRET_KEY",
 }
 ```
 

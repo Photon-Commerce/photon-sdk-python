@@ -71,9 +71,7 @@ class Config:
 
         missing = [name for name in _REQUIRED_CREDENTIALS if not getattr(self, name)]
         if missing:
-            raise ConfigurationError(
-                "Missing required credential(s): " + ", ".join(missing) + "."
-            )
+            raise ConfigurationError("Missing required credential(s): " + ", ".join(missing) + ".")
 
         # Derive the base URL from the environment unless one was given explicitly.
         if not self.base_url:
@@ -103,8 +101,7 @@ class Config:
         take precedence over the environment.
         """
         values: dict[str, Any] = {
-            name: os.environ.get(_ENV_PREFIX + name.upper(), "")
-            for name in _REQUIRED_CREDENTIALS
+            name: os.environ.get(_ENV_PREFIX + name.upper(), "") for name in _REQUIRED_CREDENTIALS
         }
         # An empty value means unset, same as PHOTON_BASE_URL below — a blank
         # line in a .env file should fall back to the default, not error.

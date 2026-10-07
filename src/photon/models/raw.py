@@ -31,9 +31,7 @@ class RawDocument(BaseDocument):
 
 
 #: Doctypes sharing the Family A schema, the one this release types.
-FAMILY_A: frozenset[str] = frozenset(
-    {DocType.INVOICE.value, DocType.RECEIPT_EXPENSE.value}
-)
+FAMILY_A: frozenset[str] = frozenset({DocType.INVOICE.value, DocType.RECEIPT_EXPENSE.value})
 
 
 def document_for(payload: Mapping[str, Any], doctype: DocType | str) -> BaseDocument:

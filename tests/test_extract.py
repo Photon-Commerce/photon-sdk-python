@@ -36,9 +36,7 @@ BASE_URL = "https://sandbox-api.photoncommerce.com"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 INVOICE_READY: dict[str, Any] = json.loads((FIXTURES / "invoice_ready.json").read_text())
-INVOICE_PROCESSING: dict[str, Any] = json.loads(
-    (FIXTURES / "invoice_processing.json").read_text()
-)
+INVOICE_PROCESSING: dict[str, Any] = json.loads((FIXTURES / "invoice_processing.json").read_text())
 
 SUBMIT_RESPONSE = {
     "photon_key": "data/user@example.com/2026-08-12/13-26-39-943699_invoice.json",
@@ -141,9 +139,7 @@ def test_poll_always_attempts_once_even_with_no_time_left() -> None:
 def test_poll_makes_a_final_attempt_at_the_deadline() -> None:
     clock = FakeClock()
     # Ready on the third call, with a deadline that lands exactly on it.
-    result = poll(
-        fetch_after(2), timeout=5, interval=2, clock=clock, sleep=clock.sleep
-    )
+    result = poll(fetch_after(2), timeout=5, interval=2, clock=clock, sleep=clock.sleep)
 
     assert result == "done"
     assert clock.slept == [2, 3]
@@ -312,9 +308,7 @@ def test_extract_with_no_timeout_submits_without_retrieving(
 
 def test_extract_forwards_submit_arguments(client: PhotonClient) -> None:
     with respx.mock(base_url=BASE_URL) as mock:
-        submit = mock.post(SUBMIT_PATH).mock(
-            return_value=httpx.Response(200, json=SUBMIT_RESPONSE)
-        )
+        submit = mock.post(SUBMIT_PATH).mock(return_value=httpx.Response(200, json=SUBMIT_RESPONSE))
         mock.get(RETRIEVE_PATH).mock(return_value=httpx.Response(200, json=INVOICE_READY))
 
         client.extract(
@@ -332,9 +326,7 @@ def test_extract_forwards_submit_arguments(client: PhotonClient) -> None:
 
 def test_extract_by_url_needs_no_document(client: PhotonClient) -> None:
     with respx.mock(base_url=BASE_URL) as mock:
-        submit = mock.post(SUBMIT_PATH).mock(
-            return_value=httpx.Response(200, json=SUBMIT_RESPONSE)
-        )
+        submit = mock.post(SUBMIT_PATH).mock(return_value=httpx.Response(200, json=SUBMIT_RESPONSE))
         mock.get(RETRIEVE_PATH).mock(return_value=httpx.Response(200, json=INVOICE_READY))
 
         data = client.extract(url="https://example.com/invoice.pdf")
@@ -345,9 +337,7 @@ def test_extract_by_url_needs_no_document(client: PhotonClient) -> None:
 
 def test_extract_without_a_photon_key_is_an_api_error(client: PhotonClient) -> None:
     with respx.mock(base_url=BASE_URL, assert_all_called=False) as mock:
-        mock.post(SUBMIT_PATH).mock(
-            return_value=httpx.Response(200, json={"message": "success"})
-        )
+        mock.post(SUBMIT_PATH).mock(return_value=httpx.Response(200, json={"message": "success"}))
         retrieve = mock.get(RETRIEVE_PATH).mock(
             return_value=httpx.Response(200, json=INVOICE_READY)
         )

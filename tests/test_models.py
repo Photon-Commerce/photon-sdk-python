@@ -27,9 +27,7 @@ from photon import (
 from photon.models import document_for
 
 FIXTURES = Path(__file__).parent / "fixtures"
-INVOICE_DATA: dict[str, Any] = json.loads(
-    (FIXTURES / "invoice_ready.json").read_text()
-)["data"]
+INVOICE_DATA: dict[str, Any] = json.loads((FIXTURES / "invoice_ready.json").read_text())["data"]
 
 # Family B (check/remittance) is camelCase with its own key field — the shape
 # this release deliberately does not type. See the API reference.
