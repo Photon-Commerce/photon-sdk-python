@@ -509,6 +509,18 @@ def test_a_raw_document_still_reads_by_field_name() -> None:
     assert doc.raw == CHECK_DATA
 
 
+def test_a_raw_document_serialises_its_payload() -> None:
+    doc = document_for(CHECK_DATA, DocType.CHECK)
+
+    data = doc.to_dict()
+    assert data == CHECK_DATA
+    data["lineItems"][0]["amount"] = "0.00"
+    assert doc["lineItems"][0]["amount"] == "980.00"  # a copy, not the raw payload
+
+    assert json.loads(doc.to_json()) == CHECK_DATA
+    assert doc.to_dict(by_alias=True) == CHECK_DATA
+
+
 def test_every_document_shares_the_base_type() -> None:
     assert isinstance(document_for(INVOICE_DATA, DocType.INVOICE), BaseDocument)
     assert isinstance(document_for(CHECK_DATA, DocType.CHECK), BaseDocument)
