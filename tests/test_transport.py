@@ -44,7 +44,8 @@ def make_config(**overrides: Any) -> Config:
 
 @pytest.fixture
 def transport() -> Iterator[Transport]:
-    with Transport(make_config()) as open_transport:
+    # Real backoff waits would slow the suite; retries are covered in test_retries.
+    with Transport(make_config(), sleep=lambda _: None) as open_transport:
         yield open_transport
 
 

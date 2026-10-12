@@ -20,6 +20,7 @@ __all__ = [
     "DOWNLOAD_PATH",
     "HEALTH_PATH",
     "MAX_POLL_INTERVAL",
+    "MAX_RETRY_DELAY",
     "PROCESSING_MARKER",
     "PROCESSING_MESSAGE",
     "RATE_LIMIT_PER_SEC",
@@ -88,6 +89,8 @@ PROCESSING_MARKER = "being processed"
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_FACTOR = 0.5
+# Ceiling on a single retry wait, however far the exponential backoff grows.
+MAX_RETRY_DELAY = 30.0
 
 # Polling defaults, tuned for AI-only extraction, which finishes in seconds.
 # Accounts with human verification can take minutes to hours, so those callers

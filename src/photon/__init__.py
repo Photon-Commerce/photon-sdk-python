@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from ._version import __version__
 from .client import PhotonClient
 from .config import Config
@@ -48,3 +50,7 @@ __all__ = [
     "TaxLine",
     "__version__",
 ]
+
+# A library leaves logging configuration to the application; the SDK's debug
+# output is opt-in via logging.getLogger("photon").
+logging.getLogger(__name__).addHandler(logging.NullHandler())
