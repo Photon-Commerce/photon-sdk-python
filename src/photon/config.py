@@ -71,8 +71,21 @@ class Config:
 
         missing = [name for name in _REQUIRED_CREDENTIALS if not getattr(self, name)]
         if missing:
+            raise ConfigurationError("Missing required credential(s): " + ", ".join(missing) + ".")
+
+        # bool is an int subclass; max_retries=True is a mistake, not one retry.
+        if (
+            isinstance(self.max_retries, bool)
+            or not isinstance(self.max_retries, int)
+            or self.max_retries < 0
+        ):
             raise ConfigurationError(
-                "Missing required credential(s): " + ", ".join(missing) + "."
+                f"max_retries must be a whole number of 0 or more, got {self.max_retries!r}."
+            )
+        # "not >= 0" also rejects NaN, which would make every backoff wait NaN.
+        if isinstance(self.backoff_factor, bool) or not self.backoff_factor >= 0:
+            raise ConfigurationError(
+                f"backoff_factor must be 0 or greater, got {self.backoff_factor!r}."
             )
 
         # Derive the base URL from the environment unless one was given explicitly.
@@ -103,8 +116,7 @@ class Config:
         take precedence over the environment.
         """
         values: dict[str, Any] = {
-            name: os.environ.get(_ENV_PREFIX + name.upper(), "")
-            for name in _REQUIRED_CREDENTIALS
+            name: os.environ.get(_ENV_PREFIX + name.upper(), "") for name in _REQUIRED_CREDENTIALS
         }
         # An empty value means unset, same as PHOTON_BASE_URL below — a blank
         # line in a .env file should fall back to the default, not error.

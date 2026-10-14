@@ -181,9 +181,7 @@ class PhotonClient:
         if (document is None) == (url is None):
             raise ValueError("Pass exactly one of 'document' or 'url'.")
         if subaccount is not None and not _is_valid_subaccount(subaccount):
-            raise ValueError(
-                "subaccount must be 1-50 characters of letters, digits, or hyphens."
-            )
+            raise ValueError("subaccount must be 1-50 characters of letters, digits, or hyphens.")
 
         params: dict[str, Any] = {
             "doctype": doctype.value if isinstance(doctype, DocType) else str(doctype),
@@ -208,9 +206,7 @@ class PhotonClient:
             elif document is not None:
                 files = {_FILE_FIELD: (_filename_for(document), document)}
 
-            body = self._transport.request_json(
-                "POST", SUBMIT_PATH, params=params, files=files
-            )
+            body = self._transport.request_json("POST", SUBMIT_PATH, params=params, files=files)
 
         return Submission.from_response(body)
 
@@ -246,9 +242,7 @@ class PhotonClient:
         if not photon_key or not photon_key.strip():
             raise ValueError("photon_key must be a non-empty string.")
 
-        body = self._transport.request_json(
-            "GET", RETRIEVE_PATH, params={"photon_key": photon_key}
-        )
+        body = self._transport.request_json("GET", RETRIEVE_PATH, params={"photon_key": photon_key})
 
         data = body.get("data")
         if not isinstance(data, dict):
@@ -388,6 +382,4 @@ def _filename_for(document: IO[bytes]) -> str:
 
 def _is_valid_subaccount(subaccount: str) -> bool:
     # fullmatch, not match: with match, "$" would accept a trailing newline.
-    return len(subaccount) <= _SUBACCOUNT_MAX_LEN and bool(
-        _SUBACCOUNT_RE.fullmatch(subaccount)
-    )
+    return len(subaccount) <= _SUBACCOUNT_MAX_LEN and bool(_SUBACCOUNT_RE.fullmatch(subaccount))

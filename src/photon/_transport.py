@@ -8,10 +8,19 @@ Classification reads the response **body** before the status code, because the A
 puts the real outcome in the body's ``message``: a document that is still
 processing comes back as an HTTP 200, and several genuine failures come back as
 403. See the official API docs (apidocs.photoncommerce.com) for the responses.
+
+Transient failures — a 5xx, or a request that never got an answer — are retried
+with capped exponential backoff and jitter. A 4xx is never retried: it reports
+a problem with the request or the account, which sending it again cannot fix.
+The API has no 429; excess traffic is queued server-side instead.
 """
 
 from __future__ import annotations
 
+import logging
+import random
+import time
+from collections.abc import Callable
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +29,7 @@ import httpx
 from ._version import __version__
 from .auth import build_auth_headers
 from .config import Config
-from .constants import PROCESSING_MARKER
+from .constants import MAX_RETRY_DELAY, PROCESSING_MARKER
 from .exceptions import (
     APIError,
     AuthenticationError,
@@ -37,6 +46,8 @@ if TYPE_CHECKING:
 
 __all__ = ["Transport"]
 
+logger = logging.getLogger(__name__)
+
 USER_AGENT = f"photon-sdk-python/{__version__}"
 
 # A 403 whose message mentions any of these is a quota problem, not a bad request.
@@ -48,6 +59,13 @@ _MESSAGE_KEYS = ("message", "error", "detail")
 # Cap on how much of a non-JSON error body is quoted back in an exception message.
 _MAX_TEXT_SNIPPET = 200
 
+# Methods that are safe to send twice: repeating one cannot create anything twice.
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+
+# Failures that happen before any of the request is sent, so even a POST can be
+# retried after one without risk of submitting a document twice.
+_NOT_SENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
 
 class Transport:
     """Sends authenticated requests to the Photon API and raises typed errors.
@@ -56,12 +74,29 @@ class Transport:
     headers, and the timeout from ``config``. Use it as a context manager, or call
     :meth:`close` when finished, so the connection pool is released.
 
+    Transient failures are retried up to ``config.max_retries`` times. A GET,
+    PUT, or DELETE is retried on any 5xx or network error. A POST is retried
+    only when the connection itself failed: after a 5xx or a lost response the
+    document may already have been accepted, and a second upload would create
+    a duplicate and spend another metered call.
+
     Args:
         config: Credentials and connection settings.
+        sleep: Override for :func:`time.sleep`, for tests.
+        jitter: Override for :func:`random.random`, for tests. Must return a
+            number in ``[0, 1)``.
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config,
+        *,
+        sleep: Callable[[float], None] | None = None,
+        jitter: Callable[[], float] | None = None,
+    ) -> None:
         self.config = config
+        self._sleep = time.sleep if sleep is None else sleep
+        self._jitter = random.random if jitter is None else jitter
         self._client = httpx.Client(
             base_url=config.base_url,
             headers={**build_auth_headers(config), "User-Agent": USER_AGENT},
@@ -202,23 +237,72 @@ class Transport:
         files: Any,
         headers: dict[str, str] | None,
     ) -> httpx.Response:
-        """Perform the network round trip, translating transport failures.
+        """Perform the network round trip, retrying transient failures.
 
-        This is the single point where the request is actually sent, and so the
-        seam retries will wrap.
+        Returns the first response that is not retried — a success, a 4xx, or
+        the last 5xx once retries run out — for the caller to classify.
+
+        Raises:
+            PhotonConnectionError: No response arrived, after any retries.
         """
-        try:
-            return self._client.request(
+        retries = 0
+        while True:
+            try:
+                response = self._client.request(
+                    method,
+                    path,
+                    params=params,
+                    json=json,
+                    data=data,
+                    files=files,
+                    headers=headers,
+                )
+            except httpx.RequestError as exc:
+                if not self._should_retry(method, retries, exc):
+                    attempts = f" after {retries + 1} attempts" if retries else ""
+                    raise PhotonConnectionError(f"{method} {path} failed{attempts}: {exc}") from exc
+                # The exception's type, not its text: the text can quote the URL,
+                # whose query string may carry a photon_key.
+                reason = type(exc).__name__
+            else:
+                if not response.is_server_error or not self._should_retry(method, retries):
+                    return response
+                reason = f"HTTP {response.status_code}"
+
+            retries += 1
+            delay = self._backoff(retries)
+            # Method and path only — never params, headers, or the body, which
+            # carry credentials, photon_keys, and document contents.
+            logger.debug(
+                "Retrying %s %s after %s in %.2fs (retry %d of %d)",
                 method,
                 path,
-                params=params,
-                json=json,
-                data=data,
-                files=files,
-                headers=headers,
+                reason,
+                delay,
+                retries,
+                self.config.max_retries,
             )
-        except httpx.RequestError as exc:
-            raise PhotonConnectionError(f"{method} {path} failed: {exc}") from exc
+            self._sleep(delay)
+
+    def _should_retry(
+        self, method: str, retries: int, error: httpx.RequestError | None = None
+    ) -> bool:
+        """Whether a failed attempt may be repeated; ``error`` is ``None`` for a 5xx."""
+        if retries >= self.config.max_retries:
+            return False
+        if method.upper() in _IDEMPOTENT_METHODS:
+            return True
+        return isinstance(error, _NOT_SENT_ERRORS)
+
+    def _backoff(self, retry: int) -> float:
+        """The wait before retry number ``retry`` (1-based), with "equal jitter".
+
+        The ceiling doubles each time from ``backoff_factor``, capped at
+        :data:`MAX_RETRY_DELAY`; the wait is drawn from its upper half, so
+        clients that failed together spread out but never retry immediately.
+        """
+        ceiling = min(self.config.backoff_factor * 2.0 ** (retry - 1), MAX_RETRY_DELAY)
+        return ceiling / 2 + self._jitter() * ceiling / 2
 
 
 def _raise_for_response(response: httpx.Response, body: Any) -> None:
