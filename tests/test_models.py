@@ -414,6 +414,15 @@ def test_an_empty_payload_parses_to_all_none() -> None:
     assert doc.raw == {}
 
 
+def test_explicit_nulls_become_none() -> None:
+    doc = InvoiceDocument.from_payload({"Vendor_Name": None, "Total": None, "Date": None})
+
+    assert doc.vendor_name is None
+    assert doc.total is None
+    assert doc.date is None
+    assert "Vendor_Name" in doc  # the key itself is still on raw
+
+
 def test_blank_strings_become_none() -> None:
     doc = InvoiceDocument.from_payload({"Notes": "", "Vendor_Name": "   ", "Total": ""})
 
@@ -449,7 +458,7 @@ def test_counts_tolerate_whatever_the_api_sends(sent: Any, expected: Any) -> Non
 
 @pytest.mark.parametrize(
     ("sent", "expected"),
-    [(True, True), ("true", True), ("False", False), ("0", False), ("?", None)],
+    [(True, True), ("true", True), ("False", False), ("0", False), ("?", None), (None, None)],
 )
 def test_flags_tolerate_whatever_the_api_sends(sent: Any, expected: Any) -> None:
     assert InvoiceDocument.from_payload({"Is_Duplicate": sent}).is_duplicate == expected

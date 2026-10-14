@@ -210,6 +210,12 @@ def test_poll_rejects_a_shrinking_backoff() -> None:
         poll(lambda: "done", timeout=60, backoff=0.5)
 
 
+@pytest.mark.parametrize("max_interval", [0, -5])
+def test_poll_rejects_a_non_positive_max_interval(max_interval: float) -> None:
+    with pytest.raises(ValueError, match="max_interval"):
+        poll(lambda: "done", timeout=60, max_interval=max_interval)
+
+
 # --------------------------------------------------------------------------- #
 # PhotonClient.extract
 # --------------------------------------------------------------------------- #
