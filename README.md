@@ -245,7 +245,7 @@ Bump `__version__` in `src/photon/_version.py`, add the version to `CHANGELOG.md
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-The release workflow builds the package, publishes it to TestPyPI, installs it from there, then publishes to PyPI and creates the GitHub release.
+The release workflow builds the package, installs it in a clean environment, publishes it to PyPI and creates the GitHub release.
 
 ## Links
 

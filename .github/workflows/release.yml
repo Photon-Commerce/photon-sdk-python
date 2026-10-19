@@ -3,12 +3,15 @@
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # Uses PyPI trusted publishing (OIDC), so no API token is stored in GitHub. One-time
-# setup on pypi.org (and test.pypi.org) under the Photon Commerce account:
+# setup on pypi.org under the Photon Commerce account:
 #   Publishing -> Add a pending publisher -> project "photon-sdk", owner
 #   "Photon-Commerce", repository "photon-sdk-python", workflow "release.yml",
-#   environment "pypi" (TestPyPI: "testpypi").
-# Then create the "pypi" and "testpypi" environments under the repo's Settings ->
-# Environments (adding required reviewers to "pypi" makes each release need approval).
+#   environment "pypi".
+# Then create the "pypi" environment under the repo's Settings -> Environments
+# (adding required reviewers to it makes each release need approval).
+#
+# There is no TestPyPI stage: "photon-sdk" on test.pypi.org belongs to an unrelated
+# project, so the built wheel is instead installed and imported in a clean venv.
 name: Release
 
 on:
@@ -39,51 +42,20 @@ jobs:
           python -m pip install build twine
           python -m build
           python -m twine check --strict dist/*
+      - name: Install the wheel in a clean venv
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/clean/bin/python -I -c "import photon, sys; assert photon.__version__ == sys.argv[1]; print(photon.__version__)" "${GITHUB_REF_NAME#v}"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  testpypi:
-    name: Publish to TestPyPI
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/photon-sdk
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
-  smoke-test:
-    name: Install from TestPyPI
-    needs: testpypi
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install and import
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          # TestPyPI's index can lag the upload by a minute.
-          for attempt in 1 2 3 4 5; do
-            python -m pip install --index-url https://test.pypi.org/simple/ \
-              --extra-index-url https://pypi.org/simple/ "photon-sdk==${version}" && break
-            sleep 30
-          done
-          python -c "import photon, sys; assert photon.__version__ == sys.argv[1]; print(photon.__version__)" "${version}"
-
   pypi:
     name: Publish to PyPI
-    needs: smoke-test
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: pypi
