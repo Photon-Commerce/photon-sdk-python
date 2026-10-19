@@ -1,0 +1,119 @@
+# Publishes to PyPI when a version tag is pushed:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Uses PyPI trusted publishing (OIDC), so no API token is stored in GitHub. One-time
+# setup on pypi.org (and test.pypi.org) under the Photon Commerce account:
+#   Publishing -> Add a pending publisher -> project "photon-sdk", owner
+#   "Photon-Commerce", repository "photon-sdk-python", workflow "release.yml",
+#   environment "pypi" (TestPyPI: "testpypi").
+# Then create the "pypi" and "testpypi" environments under the repo's Settings ->
+# Environments (adding required reviewers to "pypi" makes each release need approval).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check the tag matches the package version
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('src/photon/_version.py').read()).group(1))")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${version}" >&2
+            exit 1
+          fi
+      - name: Build
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/photon-sdk
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  smoke-test:
+    name: Install from TestPyPI
+    needs: testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install and import
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # TestPyPI's index can lag the upload by a minute.
+          for attempt in 1 2 3 4 5; do
+            python -m pip install --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ "photon-sdk==${version}" && break
+            sleep 30
+          done
+          python -c "import photon, sys; assert photon.__version__ == sys.argv[1]; print(photon.__version__)" "${version}"
+
+  pypi:
+    name: Publish to PyPI
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/photon-sdk
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create GitHub release
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create release from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {found=1; next} found && /^## \[/ {exit} found' \
+            CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md

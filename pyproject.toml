@@ -47,6 +47,18 @@ path = "src/photon/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/photon"]
 
+# An explicit list: hatch only honours .gitignore, so without it a local build would
+# also pick up git-excluded working files.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/photon",
+    "/tests",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
