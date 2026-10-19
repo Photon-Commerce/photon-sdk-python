@@ -227,6 +227,23 @@ def test_a_post_is_retried_when_it_never_left(transport: Transport, error: Excep
     assert route.calls.last.request.content.count(b"%PDF") == 1
 
 
+def test_a_caller_can_mark_a_request_as_unsafe_to_repeat(transport: Transport) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.delete(UPDATE_PATH).mock(return_value=server_error())
+        with pytest.raises(APIError):
+            transport.request_json("DELETE", UPDATE_PATH, idempotent=False)
+
+    assert route.call_count == 1
+
+
+def test_a_caller_can_mark_a_post_as_safe_to_repeat(transport: Transport) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        route = mock.post(SUBMIT_PATH).mock(side_effect=[server_error(), ok()])
+        transport.request_json("POST", SUBMIT_PATH, idempotent=True)
+
+    assert route.call_count == 2
+
+
 # --------------------------------------------------------------------------- #
 # How long it waits
 # --------------------------------------------------------------------------- #
