@@ -28,9 +28,7 @@ BASE_URL = "https://sandbox-api.photoncommerce.com"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 INVOICE_READY: dict[str, Any] = json.loads((FIXTURES / "invoice_ready.json").read_text())
-INVOICE_PROCESSING: dict[str, Any] = json.loads(
-    (FIXTURES / "invoice_processing.json").read_text()
-)
+INVOICE_PROCESSING: dict[str, Any] = json.loads((FIXTURES / "invoice_processing.json").read_text())
 
 
 def make_client(**overrides: Any) -> PhotonClient:

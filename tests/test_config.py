@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 import pytest
 
@@ -99,6 +100,34 @@ def test_missing_password_raises() -> None:
 def test_missing_secret_key_raises() -> None:
     with pytest.raises(ConfigurationError, match="secret_key"):
         make_config(secret_key="")
+
+
+def test_retry_settings_default_to_the_constants() -> None:
+    config = make_config()
+    assert config.max_retries == 3
+    assert config.backoff_factor == 0.5
+
+
+@pytest.mark.parametrize("max_retries", [0, 1, 10])
+def test_valid_max_retries_are_accepted(max_retries: int) -> None:
+    config = dataclasses.replace(make_config(), max_retries=max_retries)
+    assert config.max_retries == max_retries
+
+
+@pytest.mark.parametrize("max_retries", [-1, 1.5, "3", True, None])
+def test_invalid_max_retries_raises(max_retries: Any) -> None:
+    with pytest.raises(ConfigurationError, match="max_retries"):
+        dataclasses.replace(make_config(), max_retries=max_retries)
+
+
+@pytest.mark.parametrize("backoff_factor", [-0.1, float("nan"), True])
+def test_invalid_backoff_factor_raises(backoff_factor: float) -> None:
+    with pytest.raises(ConfigurationError, match="backoff_factor"):
+        dataclasses.replace(make_config(), backoff_factor=backoff_factor)
+
+
+def test_zero_backoff_factor_is_accepted() -> None:
+    assert dataclasses.replace(make_config(), backoff_factor=0).backoff_factor == 0
 
 
 def test_repr_masks_secrets_but_shows_username() -> None:

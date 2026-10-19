@@ -99,9 +99,7 @@ def test_unnamed_file_object_is_uploaded_with_an_extension_and_left_open(
     assert not handle.closed
 
 
-def test_named_file_object_keeps_its_own_filename(
-    tmp_path: Path, client: PhotonClient
-) -> None:
+def test_named_file_object_keeps_its_own_filename(tmp_path: Path, client: PhotonClient) -> None:
     document = tmp_path / "receipt.png"
     document.write_bytes(PDF_BYTES)
 

@@ -44,7 +44,8 @@ def make_config(**overrides: Any) -> Config:
 
 @pytest.fixture
 def transport() -> Iterator[Transport]:
-    with Transport(make_config()) as open_transport:
+    # Real backoff waits would slow the suite; retries are covered in test_retries.
+    with Transport(make_config(), sleep=lambda _: None) as open_transport:
         yield open_transport
 
 
@@ -171,6 +172,33 @@ def test_empty_error_body_falls_back_to_the_reason_phrase(transport: Transport) 
             transport.request_json("GET", RETRIEVE_PATH)
 
     assert caught.value.message == "Internal Server Error"
+
+
+def test_malformed_json_error_body_falls_back_to_the_reason_phrase(
+    transport: Transport,
+) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.get(RETRIEVE_PATH).mock(
+            return_value=httpx.Response(
+                400, content=b"{not json", headers={"content-type": "application/json"}
+            )
+        )
+        with pytest.raises(InvalidRequestError) as caught:
+            transport.request_json("GET", RETRIEVE_PATH)
+
+    assert caught.value.body is None
+    assert caught.value.message == "Bad Request"
+
+
+def test_a_long_text_error_body_is_truncated(transport: Transport) -> None:
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.get(RETRIEVE_PATH).mock(
+            return_value=httpx.Response(400, text="x" * 500, headers={"content-type": "text/plain"})
+        )
+        with pytest.raises(InvalidRequestError) as caught:
+            transport.request_json("GET", RETRIEVE_PATH)
+
+    assert caught.value.message == "x" * 200 + "…"
 
 
 def test_network_failure_raises_connection_error(transport: Transport) -> None:

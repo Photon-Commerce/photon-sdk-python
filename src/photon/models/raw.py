@@ -7,6 +7,8 @@ guess at a schema it does not know, the SDK returns those results as a
 
 from __future__ import annotations
 
+import copy
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -29,11 +31,20 @@ class RawDocument(BaseDocument):
     Nothing is lost: :attr:`~PayloadModel.raw` holds the whole payload.
     """
 
+    # With no typed fields, the typed view would be empty; the payload itself
+    # is the useful answer. Keys are the API's own names either way.
+
+    def to_dict(self, *, by_alias: bool = False) -> dict[str, Any]:
+        """A deep copy of the payload, so changing it cannot alter :attr:`raw`."""
+        return copy.deepcopy(self.raw)
+
+    def to_json(self, *, by_alias: bool = False, indent: int | None = None) -> str:
+        """The payload as JSON."""
+        return json.dumps(self.raw, indent=indent)
+
 
 #: Doctypes sharing the Family A schema, the one this release types.
-FAMILY_A: frozenset[str] = frozenset(
-    {DocType.INVOICE.value, DocType.RECEIPT_EXPENSE.value}
-)
+FAMILY_A: frozenset[str] = frozenset({DocType.INVOICE.value, DocType.RECEIPT_EXPENSE.value})
 
 
 def document_for(payload: Mapping[str, Any], doctype: DocType | str) -> BaseDocument:
