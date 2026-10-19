@@ -120,6 +120,7 @@ class Transport:
         data: dict[str, Any] | None = None,
         files: Any = None,
         headers: dict[str, str] | None = None,
+        idempotent: bool | None = None,
     ) -> httpx.Response:
         """Send a request and return the successful response.
 
@@ -134,6 +135,9 @@ class Transport:
             data: Form fields for a multipart or form-encoded body.
             files: Files for a multipart body, in httpx's format.
             headers: Extra headers, merged over the client's defaults.
+            idempotent: Whether repeating the request is harmless, which
+                decides how it is retried. ``None`` infers it from the method;
+                pass ``False`` for a PUT or DELETE that is not safe to repeat.
 
         Returns:
             The response, which is guaranteed to have a 2xx status.
@@ -147,7 +151,14 @@ class Transport:
             PhotonConnectionError: The request never reached the API.
         """
         response, _ = self._request(
-            method, path, params=params, json=json, data=data, files=files, headers=headers
+            method,
+            path,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            headers=headers,
+            idempotent=idempotent,
         )
         return response
 
@@ -161,6 +172,7 @@ class Transport:
         data: dict[str, Any] | None = None,
         files: Any = None,
         headers: dict[str, str] | None = None,
+        idempotent: bool | None = None,
     ) -> dict[str, Any]:
         """Send a request and return the decoded JSON object.
 
@@ -168,7 +180,14 @@ class Transport:
         plus an :class:`APIError` if the response body is not a JSON object.
         """
         response, body = self._request(
-            method, path, params=params, json=json, data=data, files=files, headers=headers
+            method,
+            path,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            headers=headers,
+            idempotent=idempotent,
         )
         if not isinstance(body, dict):
             raise APIError(
@@ -211,6 +230,7 @@ class Transport:
         data: dict[str, Any] | None = None,
         files: Any = None,
         headers: dict[str, str] | None = None,
+        idempotent: bool | None = None,
     ) -> tuple[httpx.Response, Any]:
         """Send one request, classify the result, and return it with its body."""
         response = self._send(
@@ -221,6 +241,7 @@ class Transport:
             data=data,
             files=files,
             headers=headers,
+            idempotent=method.upper() in _IDEMPOTENT_METHODS if idempotent is None else idempotent,
         )
         body = _decode_body(response)
         _raise_for_response(response, body)
@@ -236,6 +257,7 @@ class Transport:
         data: dict[str, Any] | None,
         files: Any,
         headers: dict[str, str] | None,
+        idempotent: bool,
     ) -> httpx.Response:
         """Perform the network round trip, retrying transient failures.
 
@@ -258,14 +280,14 @@ class Transport:
                     headers=headers,
                 )
             except httpx.RequestError as exc:
-                if not self._should_retry(method, retries, exc):
+                if not self._should_retry(idempotent, retries, exc):
                     attempts = f" after {retries + 1} attempts" if retries else ""
                     raise PhotonConnectionError(f"{method} {path} failed{attempts}: {exc}") from exc
                 # The exception's type, not its text: the text can quote the URL,
                 # whose query string may carry a photon_key.
                 reason = type(exc).__name__
             else:
-                if not response.is_server_error or not self._should_retry(method, retries):
+                if not response.is_server_error or not self._should_retry(idempotent, retries):
                     return response
                 reason = f"HTTP {response.status_code}"
 
@@ -285,12 +307,12 @@ class Transport:
             self._sleep(delay)
 
     def _should_retry(
-        self, method: str, retries: int, error: httpx.RequestError | None = None
+        self, idempotent: bool, retries: int, error: httpx.RequestError | None = None
     ) -> bool:
         """Whether a failed attempt may be repeated; ``error`` is ``None`` for a 5xx."""
         if retries >= self.config.max_retries:
             return False
-        if method.upper() in _IDEMPOTENT_METHODS:
+        if idempotent:
             return True
         return isinstance(error, _NOT_SENT_ERRORS)
 

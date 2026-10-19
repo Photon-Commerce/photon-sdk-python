@@ -9,11 +9,12 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/photon-sdk/"><img src="https://img.shields.io/pypi/v/photon-sdk?style=flat-square" alt="PyPI"></a>
   <a href="https://www.photoncommerce.com"><img src="https://img.shields.io/badge/SOC%202-Compliant-2ea44f?style=flat-square" alt="SOC 2"></a>
   <a href="https://www.photoncommerce.com"><img src="https://img.shields.io/badge/GDPR-Attested-2ea44f?style=flat-square" alt="GDPR"></a>
   <a href="https://www.photoncommerce.com/pricing"><img src="https://img.shields.io/badge/Accuracy-99%25%2B-2ea44f?style=flat-square" alt="Accuracy"></a>
   <a href="https://www.photoncommerce.com/platform"><img src="https://img.shields.io/badge/Languages-25%2B-2ea44f?style=flat-square" alt="Languages"></a>
-  <img src="https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.9+">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
 </p>
 
 <p align="center">
@@ -29,7 +30,7 @@
 
 Photon Commerce extracts standardized data from documents (PDFs, images, Word, HTML, and emails) with **99%+ accuracy**, combining AI processing with human verification. Results come back as JSON with 100+ standardized fields across amounts, vendor, bill-to, metadata, line items, and payment details, in **25+ languages**.
 
-This SDK will wrap that API in an ergonomic, fully typed Python client so you can extract a document in a single call.
+This SDK wraps that API in a fully typed Python client: extract a document in a single call, read the result as typed attributes, and correct it in place.
 
 ## Installation
 
@@ -72,59 +73,101 @@ Get **free sandbox credentials** (20 complimentary extractions, no payment info 
 | **Line Items** | Description, quantity, unit price, amount, SKU, GL code |
 | **Payment** | Payment terms, bank details, IBAN, routing number |
 
-## How It Works
+## Usage
 
-Extraction is a two-step flow. Until the SDK ships, here is the raw API workflow using [`requests`](https://pypi.org/project/requests/) — this works today.
+### Credentials
 
-```python
-import requests
+Pass the five credentials to `PhotonClient`, or set them as environment variables and use `PhotonClient.from_env()`:
 
-HEADERS = {
-    "CLIENT-ID": "YOUR_CLIENT_ID",
-    "AUTHORIZATION": "apikey YOUR_USERNAME:YOUR_API_KEY",
-    "PASSWORD": "YOUR_PASSWORD",
-    "SECRET-KEY": "YOUR_SECRET_KEY",
-}
+```bash
+export PHOTON_CLIENT_ID=...
+export PHOTON_USERNAME=...      # your account email
+export PHOTON_API_KEY=...
+export PHOTON_PASSWORD=...
+export PHOTON_SECRET_KEY=...
+export PHOTON_ENVIRONMENT=sandbox   # or "production"
 ```
 
-### Submission
-
-`POST https://sandbox-api.photoncommerce.com/api/pro?doctype=invoice`
-
 ```python
-response = requests.post(
-    "https://sandbox-api.photoncommerce.com/api/pro",
-    headers=HEADERS,
-    params={"doctype": "invoice"},
-    files={"pdf": open("invoice.pdf", "rb")},
-)
-photon_key = response.json()["photon_key"]
+from photon import PhotonClient
+
+with PhotonClient.from_env() as client:
+    ...
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `doctype` | string | Document type, e.g. `invoice` |
-| `url` | string | URL of a publicly accessible document (alternative to file upload) |
-| `webhook_url` | string | Receive a callback when extraction is complete |
-| `auth_token` | string | Token to verify the webhook callback |
-| `ID` | string | Your own reference ID for this submission |
-| `subaccount` | string | Route to a subaccount |
-| `page_start` | integer | First page to process (multi-page PDFs) |
-| `page_end` | integer | Last page to process (multi-page PDFs) |
+### Extract a document
 
-### Retrieval
-
-`GET https://sandbox-api.photoncommerce.com/api/v4/json?photon_key=YOUR_PHOTON_KEY`
+`extract()` uploads the document and polls until the result is ready:
 
 ```python
-result = requests.get(
-    "https://sandbox-api.photoncommerce.com/api/v4/json",
-    headers=HEADERS,
-    params={"photon_key": photon_key},
-).json()["data"]
+invoice = client.extract("invoice.pdf", doctype="invoice", timeout=600)
 
-print(result["Vendor_Name"], result["Total"], result["Currency_Code"])
+invoice.vendor_name  # "Acme Supplies Ltd"
+invoice.total  # Decimal("1397.50")
+invoice.due_date  # datetime.date(2026, 11, 18)
+for line in invoice.line_items:
+    print(line.line, line.description, line.qty, line.amount)
+
+invoice["Vendor_Name"]  # the API's own field names work too
+invoice.raw  # the untouched payload
+invoice.to_dict()  # typed fields as a dict; to_json() for JSON
 ```
+
+A document can be a path, an open binary file, raw `bytes`, or a public URL (`client.extract(url="https://...")`).
+
+Invoices and receipts (`doctype="invoice"` / `"receipt-expense"`) return a typed `InvoiceDocument`: amounts are exact `Decimal`s, ISO dates are `datetime.date`, and anything absent reads as `None`. Every other doctype (`check`, `remittance`, `bol`, `statement`, ...) returns a `RawDocument`, read by the API's field names: `doc["payerName"]`.
+
+### Submit now, retrieve later
+
+Processing can take from seconds (AI extraction) to hours (human verification), so you can also split the two steps:
+
+```python
+submission = client.submit("invoice.pdf", doctype="invoice", webhook_url="https://example.com/hook")
+# ... later, or once the webhook fires:
+invoice = client.retrieve(submission.photon_key, doctype="invoice")
+```
+
+`retrieve()` raises `NotReadyError` while the document is still processing. `extract(..., timeout=None)` submits without waiting and returns the `Submission`.
+
+### Correct extracted data
+
+Updates use the **API's field names**, exactly as the result spells them:
+
+```python
+key = invoice.photon_key
+
+client.update_fields(key, {"Vendor_Name": "Acme Supplies Ltd", "Total": "1397.50"})
+client.update_line_item(key, 2, {"QTY": 3, "Amount": "225.00"})
+client.add_line_item(key, {"Line": 3, "Description": "Shipping", "QTY": 1, "Amount": "25.00"})
+client.delete_line_item(key, 3)
+```
+
+### Errors
+
+Every error raised by the SDK is a `PhotonError` carrying `status_code`, `message` and the response `body`:
+
+| Exception | When |
+|-----------|------|
+| `AuthenticationError` | Credentials rejected (401) |
+| `QuotaExceededError` | The account's allowance is used up |
+| `InvalidRequestError` | The request or file was rejected (bad file, unknown key, invalid line item, ...) |
+| `NotReadyError` | The document is still processing |
+| `ExtractionTimeoutError` | `extract()` gave up waiting; retrieve later by `photon_key` |
+| `PhotonConnectionError` | The API could not be reached |
+| `APIError` | Any other unsuccessful response |
+| `ConfigurationError` | Missing credentials or an unknown environment |
+
+Invalid arguments raise `ValueError` before anything is sent.
+
+### Retries
+
+Server errors (5xx) and network failures are retried up to `max_retries` times (default 3) with exponential backoff. Requests that could take effect twice — submitting a document, adding or deleting a line item — are only retried when the connection itself failed. 4xx errors are never retried.
+
+```python
+client = PhotonClient.from_env(max_retries=5, backoff_factor=1.0, timeout=60)
+```
+
+Retries are logged at `DEBUG` on the `photon` logger; credentials and document keys are never logged.
 
 ## Processing Times
 
@@ -136,7 +179,7 @@ print(result["Vendor_Name"], result["Total"], result["Currency_Code"])
 
 ## Authentication
 
-Every request requires four headers. Free sandbox credentials are available at no cost.
+The SDK sends your credentials as four headers on every request. Free sandbox credentials are available at no cost.
 
 ```
 CLIENT-ID:     your-client-id
@@ -188,10 +231,21 @@ git clone https://github.com/Photon-Commerce/photon-sdk-python.git
 cd photon-sdk-python
 pip install -e ".[dev]"
 
-pytest        # run tests
-ruff check .  # lint
-mypy          # type-check
+pytest --cov          # run tests with coverage
+ruff check .          # lint
+ruff format --check . # formatting
+mypy                  # type-check
 ```
+
+## Releasing
+
+Bump `__version__` in `src/photon/_version.py`, add the version to `CHANGELOG.md`, merge to `main`, then push a matching tag:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+The release workflow builds the package, publishes it to TestPyPI, installs it from there, then publishes to PyPI and creates the GitHub release.
 
 ## Links
 
