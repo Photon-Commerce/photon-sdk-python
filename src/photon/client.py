@@ -11,6 +11,9 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+from collections.abc import Mapping
+from datetime import date
+from decimal import Decimal
 from types import TracebackType
 from typing import IO, TYPE_CHECKING, Any, cast, overload
 
@@ -25,10 +28,12 @@ from .constants import (
     DEFAULT_TIMEOUT,
     RETRIEVE_PATH,
     SUBMIT_PATH,
+    UPDATE_LINE_ITEM_PATH,
+    UPDATE_PATH,
     DocType,
     Environment,
 )
-from .exceptions import APIError
+from .exceptions import APIError, InvalidRequestError
 from .models import BaseDocument, Submission, document_for
 
 if TYPE_CHECKING:
@@ -53,6 +58,9 @@ _DEFAULT_FILENAME = "upload.pdf"
 
 _SUBACCOUNT_MAX_LEN = 50
 _SUBACCOUNT_RE = re.compile(r"[A-Za-z0-9-]+")
+
+# Line item IDs are the API's own numbering: ASCII digits only.
+_LINE_ITEM_ID_RE = re.compile(r"[0-9]+")
 
 
 class PhotonClient:
@@ -239,8 +247,7 @@ class PhotonClient:
             PhotonError: See :meth:`Transport.request_json` for the rest of
                 the mapping.
         """
-        if not photon_key or not photon_key.strip():
-            raise ValueError("photon_key must be a non-empty string.")
+        _check_photon_key(photon_key)
 
         body = self._transport.request_json("GET", RETRIEVE_PATH, params={"photon_key": photon_key})
 
@@ -340,6 +347,64 @@ class PhotonClient:
             interval=poll_interval,
         )
 
+    def update_fields(self, photon_key: str, fields: Mapping[str, Any]) -> None:
+        """Correct extracted fields on a processed document.
+
+        Keys are the **API's own field names**, exactly as the result spells
+        them — ``{"Vendor_Name": ..., "Total": ...}`` for an invoice. They are
+        sent as given: the SDK does not translate attribute names such as
+        ``vendor_name``, because the same word means different fields in
+        different doctype families (``total`` is a check's field, ``Total`` an
+        invoice's). :class:`~decimal.Decimal` and :class:`~datetime.date`
+        values are sent as strings (``"1397.50"``, ``"2026-10-19"``).
+
+        Args:
+            photon_key: The document's key, from :attr:`Submission.photon_key`.
+            fields: The fields to change, by API field name.
+
+        Raises:
+            ValueError: ``photon_key`` or ``fields`` is empty, or a field name
+                is not a non-empty string — checked before any I/O.
+            InvalidRequestError: The API rejected the update.
+            PhotonError: See :meth:`Transport.request_json` for the rest of
+                the mapping.
+        """
+        _check_photon_key(photon_key)
+        body = _json_fields(fields)
+        response = self._transport.request_json(
+            "PUT", UPDATE_PATH, params={"photon_key": photon_key}, json=body
+        )
+        _expect_success(response)
+
+    def update_line_item(
+        self, photon_key: str, line_item_id: int | str, fields: Mapping[str, Any]
+    ) -> None:
+        """Correct fields on one of a document's line items.
+
+        Args:
+            photon_key: The document's key.
+            line_item_id: The line's ID — its ``Line`` number on an invoice.
+            fields: The line fields to change, by API field name, e.g.
+                ``{"QTY": 12, "Amount": "1380.00"}``. Sent as for
+                :meth:`update_fields`.
+
+        Raises:
+            ValueError: An empty ``photon_key`` or ``fields``, or a
+                ``line_item_id`` that is not a whole number — checked before
+                any I/O.
+            InvalidRequestError: The API rejected the update, e.g. no line has
+                that ID.
+            PhotonError: See :meth:`Transport.request_json` for the rest of
+                the mapping.
+        """
+        _check_photon_key(photon_key)
+        path = _line_item_path(line_item_id)
+        body = _json_fields(fields)
+        response = self._transport.request_json(
+            "PUT", path, params={"photon_key": photon_key}, json=body
+        )
+        _expect_success(response)
+
     def close(self) -> None:
         """Close the underlying connection pool. Safe to call more than once."""
         self._transport.close()
@@ -383,3 +448,51 @@ def _filename_for(document: IO[bytes]) -> str:
 def _is_valid_subaccount(subaccount: str) -> bool:
     # fullmatch, not match: with match, "$" would accept a trailing newline.
     return len(subaccount) <= _SUBACCOUNT_MAX_LEN and bool(_SUBACCOUNT_RE.fullmatch(subaccount))
+
+
+def _check_photon_key(photon_key: str) -> None:
+    if not isinstance(photon_key, str) or not photon_key.strip():
+        raise ValueError("photon_key must be a non-empty string.")
+
+
+def _line_item_path(line_item_id: int | str) -> str:
+    """The update/delete path for a line item, after checking its ID."""
+    # bool is an int subclass; True is a mistake, not line 1.
+    valid_type = isinstance(line_item_id, (int, str)) and not isinstance(line_item_id, bool)
+    text = str(line_item_id).strip() if valid_type else ""
+    if not _LINE_ITEM_ID_RE.fullmatch(text):
+        raise ValueError(f"line_item_id must be a whole number, got {line_item_id!r}.")
+    return f"{UPDATE_LINE_ITEM_PATH}/{text}"
+
+
+def _json_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Check an update's fields and make their values JSON-serialisable."""
+    if not isinstance(fields, Mapping) or not fields:
+        raise ValueError("fields must be a non-empty mapping of API field names to values.")
+    body: dict[str, Any] = {}
+    for name, value in fields.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"Field names must be non-empty strings, got {name!r}.")
+        body[name] = _json_value(value)
+    return body
+
+
+def _json_value(value: Any) -> Any:
+    # The models parse amounts to Decimal and dates to date; accept them back.
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _expect_success(body: dict[str, Any]) -> None:
+    """Raise if a 2xx response's body still reports a failure."""
+    status = body.get("status")
+    if status is None or (isinstance(status, str) and status.lower() == "success"):
+        return
+    message = body.get("message")
+    raise InvalidRequestError(
+        message if isinstance(message, str) and message else f"Request failed: {status!r}",
+        body=body,
+    )
