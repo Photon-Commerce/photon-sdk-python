@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/photon-sdk/"><img src="https://img.shields.io/pypi/v/photon-sdk?style=flat-square" alt="PyPI"></a>
+  <a href="https://pypi.org/project/photon-commerce/"><img src="https://img.shields.io/pypi/v/photon-commerce?style=flat-square" alt="PyPI"></a>
   <a href="https://www.photoncommerce.com"><img src="https://img.shields.io/badge/SOC%202-Compliant-2ea44f?style=flat-square" alt="SOC 2"></a>
   <a href="https://www.photoncommerce.com"><img src="https://img.shields.io/badge/GDPR-Attested-2ea44f?style=flat-square" alt="GDPR"></a>
   <a href="https://www.photoncommerce.com/pricing"><img src="https://img.shields.io/badge/Accuracy-99%25%2B-2ea44f?style=flat-square" alt="Accuracy"></a>
@@ -35,7 +35,7 @@ This SDK wraps that API in a fully typed Python client: extract a document in a 
 ## Installation
 
 ```bash
-pip install photon-sdk
+pip install photon-commerce
 ```
 
 ## Quick Start
@@ -242,7 +242,7 @@ mypy                  # type-check
 Bump `__version__` in `src/photon/_version.py`, add the version to `CHANGELOG.md`, merge to `main`, then push a matching tag:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.1 && git push origin v0.1.1
 ```
 
 The release workflow builds the package, installs it in a clean environment, publishes it to PyPI and creates the GitHub release.

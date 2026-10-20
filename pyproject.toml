@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "photon-sdk"
+name = "photon-commerce"
 dynamic = ["version"]
 description = "Python SDK for Photon Commerce — process documents via the Photon API."
 readme = "README.md"

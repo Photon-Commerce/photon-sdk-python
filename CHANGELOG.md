@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-20
+
+### Changed
+
+- The package is now published to PyPI as **`photon-commerce`**
+  (`pip install photon-commerce`). It was released as `photon-sdk` 0.1.0; that name
+  is retired. The import name is unchanged: `from photon import PhotonClient`.
+
 ## [0.1.0] - 2026-10-19
 
 First public release.
@@ -33,4 +41,5 @@ First public release.
 - `DEBUG` logging of retries on the `photon` logger, never including credentials
   or document keys.
 
+[0.1.1]: https://github.com/Photon-Commerce/photon-sdk-python/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Photon-Commerce/photon-sdk-python/releases/tag/v0.1.0
